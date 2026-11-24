@@ -1,0 +1,14 @@
+{
+  "name": "pets-at-war",
+  "version": "1.0.0",
+  "description": "A blocky 3D browser game: protect the pet that keeps you alive while monster waves pour out of portals.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node serve.mjs 8000",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0"
+  }
+}
