@@ -137,6 +137,29 @@ export const FX = {
     });
   },
 
+  // Directed spray of glowing particles (dragon fire, frost breath).
+  jet(pos, dir, o = {}) {
+    const n = o.count ?? 6;
+    const cols = o.colors ?? [0xffffff];
+    const inten = o.intensity ?? 2.6;
+    for (let i = 0; i < n; i++) {
+      const sp = (o.speed ?? 28) * (0.75 + Math.random() * 0.5);
+      const spread = o.spread ?? 0.22;
+      const c = tmpColor.set(cols[Math.floor(Math.random() * cols.length)]);
+      const life = (o.life ?? 0.7) * (0.7 + Math.random() * 0.5);
+      glow.add({
+        x: pos.x + (Math.random() - 0.5) * 0.4, y: pos.y + (Math.random() - 0.5) * 0.4, z: pos.z + (Math.random() - 0.5) * 0.4,
+        vx: (dir.x + (Math.random() - 0.5) * 2 * spread) * sp,
+        vy: (dir.y + (Math.random() - 0.5) * 2 * spread) * sp,
+        vz: (dir.z + (Math.random() - 0.5) * 2 * spread) * sp,
+        life, max: life,
+        size: (o.size ?? 0.35) * (0.7 + Math.random() * 0.6), size1: (o.size1 ?? 1.6) * (0.7 + Math.random() * 0.6),
+        r: c.r * inten, g: c.g * inten, b: c.b * inten,
+        grav: o.gravity ?? -3, drag: o.drag ?? 0.9, rot: Math.random() * 6, spin: (Math.random() - 0.5) * 8, floor: false,
+      });
+    }
+  },
+
   // Expanding flat ring on the ground.
   ring(pos, hex, radius = 3, life = 0.5) {
     const mat = new THREE.MeshBasicMaterial({

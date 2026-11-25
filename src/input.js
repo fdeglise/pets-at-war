@@ -114,6 +114,9 @@ export const Input = {
         <button class="tb" data-key="KeyQ" aria-label="Pet heal">Q</button>
         <button class="tb" data-key="KeyR" aria-label="Next weapon">SWAP</button>
         <button class="tb" data-key="KeyB" aria-label="Shop">SHOP</button>
+        <button class="tb" data-key="KeyF" aria-label="Ride your pet">RIDE</button>
+        <button class="tb" data-key="ShiftLeft" aria-label="Fly down">DOWN</button>
+        <button class="tb" data-key="KeyJ" aria-label="Quests">QUEST</button>
       </div>`;
     root.appendChild(wrap);
     const stick = wrap.querySelector('#stick');

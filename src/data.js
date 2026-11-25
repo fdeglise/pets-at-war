@@ -57,13 +57,31 @@ export const MONSTERS = {
   imp:      { name: 'Ember Imp',   hp: 36,  dmg: 9,  speed: 4.4, range: 15,  rate: 2.4, windup: 0.5,  coins: 10,  weak: 'ice',       resist: 'fire',   tame: 0.55, unlock: 3, color: 0xd9412b, ranged: 'fireball', projSpeed: 17 },
   skeleton: { name: 'Bone Archer', hp: 48,  dmg: 10, speed: 3.8, range: 20,  rate: 2.6, windup: 0.55, coins: 12,  weak: 'lightning', resist: 'ice',    tame: 0.55, unlock: 4, color: 0xece6d6, ranged: 'bonearrow', projSpeed: 30 },
   golem:    { name: 'Stone Golem', hp: 170, dmg: 18, speed: 2.5, range: 2.6, rate: 2.3, windup: 0.7,  coins: 25,  weak: 'lightning', resist: 'poison', tame: 0.4,  unlock: 6, color: 0x8a8a86, slam: 3.6, heavy: true },
-  ogre:     { name: 'Shadow Ogre', hp: 800, dmg: 26, speed: 3.1, range: 3.6, rate: 2.4, windup: 0.8,  coins: 160, weak: null,        resist: null,     tame: 0,    unlock: 99, color: 0x8a5cc0, slam: 5.5, heavy: true, boss: true },
+  ogre:     { name: 'Shadow Ogre', hp: 800, dmg: 26, speed: 3.1, range: 3.6, rate: 2.4, windup: 0.8,  coins: 160, weak: null,        resist: null,     tame: 0,    unlock: 99, color: 0x8a5cc0, slam: 5.5, heavy: true, boss: true, summon: ['slime', 'wolf'], summonCd: 11 },
+  // Boss 2: sleeps at the top of Frostpeak. Its slam and thrown boulders slow you down.
+  titan:    { name: 'Frost Titan', hp: 1150, dmg: 28, speed: 2.9, range: 4.4, rate: 2.5, windup: 0.9,  coins: 320, weak: 'fire',      resist: 'ice',    tame: 0,    unlock: 99, color: 0x9fdcff, slam: 6.5, heavy: true, boss: true, frost: true, throws: 'iceboulder', throwCd: 5.5, summon: ['wolf', 'wolf'], summonCd: 16 },
+  // Boss 3: flies, breathes fire, spits fireballs, dives and sometimes lands. Its death wins the game.
+  dragon:   { name: 'Ignis the Dragon', hp: 5200, dmg: 27, speed: 17, range: 6, rate: 2, windup: 0.6, coins: 1200, weak: 'ice',       resist: 'fire',   tame: 0,    unlock: 99, color: 0xd0301e, heavy: true, boss: true, flying: true, fixedLevel: true, summon: ['imp', 'imp', 'imp'] },
 };
 
+// The three quests that earn the Sky Relics. All three give your pet Sky Wings.
+export const QUESTS = [
+  { id: 'ogre', relic: 'Storm Feather', title: 'Defeat the Shadow Ogre', where: 'Haven Isle · it comes through the portals with wave 5', color: '#c56bff' },
+  { id: 'titan', relic: 'Frost Heart', title: 'Defeat the Frost Titan', where: 'Frostpeak summit · take the blue portal', color: '#8fe8ff' },
+  { id: 'feathers', relic: 'Phoenix Plume', title: 'Collect 5 phoenix feathers', where: 'Ember Isle · take the orange portal', color: '#ff9a4a', goal: 5 },
+];
+export const RELIC_BONUS = 150; // coins for each finished quest
+
+// Riding: how high each pet's back is once it has grown to carry you.
+export const MOUNT_SCALE = 2.4;
+export const FLY_SPEED = 24;
+export const FLY_CLIMB = 15;
+export const FLY_CEILING = 95;
+
 export const PETS = {
-  fox:    { name: 'Ember',  species: 'Fox',    hp: 220, heal: 3.2, blurb: 'Balanced healer with a sturdy coat.' },
-  bunny:  { name: 'Clover', species: 'Bunny',  hp: 160, heal: 5.0, blurb: 'Fragile, but heals you fast.' },
-  turtle: { name: 'Shelly', species: 'Turtle', hp: 340, heal: 2.2, blurb: 'Slow healer with a thick shell.' },
+  fox:    { name: 'Ember',  species: 'Fox',    hp: 220, heal: 3.2, seat: 0.86, blurb: 'Balanced healer with a sturdy coat.' },
+  bunny:  { name: 'Clover', species: 'Bunny',  hp: 160, heal: 5.0, seat: 0.78, blurb: 'Fragile, but heals you fast.' },
+  turtle: { name: 'Shelly', species: 'Turtle', hp: 340, heal: 2.2, seat: 0.88, blurb: 'Slow healer with a thick shell.' },
 };
 export const PET_UPGRADES = {
   vitality: { name: 'Vitality', max: 6, text: (l) => `+${l * 40} pet max HP`, cost: (l) => Math.round(110 * Math.pow(l, 1.45)) },

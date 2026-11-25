@@ -94,7 +94,7 @@ export function pickUp(d) {
   return true;
 }
 
-export function spawnChest(pos) {
+export function spawnChest(pos, life = 150, level = 0) {
   const c = M.makeChest();
   c.root.position.copy(pos);
   c.root.rotation.y = Math.random() * Math.PI * 2;
@@ -102,7 +102,7 @@ export function spawnChest(pos) {
   const beam = M.makeBeam(0xffd24a, 9);
   beam.material.color.multiplyScalar(0.6);
   c.root.add(beam);
-  const chest = { ...c, pos: pos.clone(), opened: false, openT: 0, life: 150, beam };
+  const chest = { ...c, pos: pos.clone(), opened: false, openT: 0, life, level, beam };
   G.chests.push(chest);
   return chest;
 }
@@ -112,7 +112,7 @@ export function openChest(c) {
   c.opened = true;
   c.openT = 0;
   Audio.play('chest');
-  const wave = Math.max(1, Waves.n);
+  const wave = Math.max(1, Waves.n, c.level || 0);
   const p = c.pos.clone();
   p.x += Math.sin(c.root.rotation.y) * 1.8;
   p.z += Math.cos(c.root.rotation.y) * 1.8;
@@ -130,7 +130,7 @@ export function updateLoot(dt) {
     c.age += dt;
     c.life -= dt;
     const d = p ? c.pos.distanceTo(tmp.set(p.pos.x, p.pos.y + 1.2, p.pos.z)) : 99;
-    if (c.age > 0.5 && d < 7 && p.isAlive()) c.magnet = true;
+    if (c.age > 0.5 && d < (p.mounted ? 16 : 7) && p.isAlive()) c.magnet = true;
     if (c.magnet) {
       const dir = tmp.set(p.pos.x, p.pos.y + 1.2, p.pos.z).sub(c.pos).normalize();
       c.vel.lerp(dir.multiplyScalar(18), Math.min(1, dt * 8));

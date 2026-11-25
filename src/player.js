@@ -1,14 +1,15 @@
 // The player avatar: movement, sword swings, bow shots, getting knocked down.
 import * as THREE from 'three';
 import { G, enemies } from './game.js';
-import { WEAPONS, ARMORS, ELEMENTS, REVIVE_COST, makeItem } from './data.js';
+import { WEAPONS, ARMORS, ELEMENTS, REVIVE_COST, FLY_SPEED, FLY_CLIMB, FLY_CEILING, makeItem } from './data.js';
 import * as M from './models.js';
 import { FX } from './effects.js';
 import { Audio } from './audio.js';
 import { UI } from './ui.js';
 import { Input } from './input.js';
 import { weaponHit, hitMonster, spawnProjectile } from './combat.js';
-import { dampAngle, damp } from './util.js';
+import { dampAngle, damp, clamp } from './util.js';
+import { HALF } from './world.js';
 
 const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
@@ -47,7 +48,36 @@ export class Player {
     this.weaponObj = null;
     this.mats = M.collectMats(this.root);
     this.flashT = 0;
+    this.mounted = false;
+    this.slowT = 0;
     this.refreshWeaponModel();
+  }
+
+  slowFor(t) {
+    this.slowT = Math.max(this.slowT, t);
+  }
+
+  // F: climb on your winged pet, or hop off over solid ground.
+  toggleMount() {
+    const pet = G.pet;
+    if (!pet || !pet.alive || this.downed > 0) return 'You can\'t do that right now';
+    if (!pet.winged) return `${pet.name} needs Sky Wings first. Bring the Elder three Sky Relics.`;
+    if (!this.mounted) {
+      this.mounted = true;
+      pet.setMounted(true);
+      this.vel.set(0, 4, 0);
+      this.onGround = false;
+      Audio.play('wings');
+      return null;
+    }
+    if (!G.world.walkable(this.pos.x, this.pos.z)) return 'Fly over solid ground to get off';
+    this.mounted = false;
+    pet.setMounted(false);
+    this.vel.set(this.vel.x * 0.3, 0, this.vel.z * 0.3);
+    this.onGround = false;
+    this.rig.hipL.rotation.z = this.rig.hipR.rotation.z = 0;
+    Audio.play('wings');
+    return null;
   }
 
   get weapon() { return this.weapons[this.slot] || null; }
@@ -107,8 +137,10 @@ export class Player {
 
   takeHit(dmg) {
     if (this.downed > 0 || this.invuln > 0 || G.state !== 'playing') return;
+    if (G.won) return;
     const a = this.armorDef();
     dmg *= 1 - (a ? a.def : 0);
+    if (this.mounted) dmg *= 0.85; // your pet's wings shield you a little
     dmg = Math.max(1, Math.round(dmg));
     this.hp -= dmg;
     this.flashT = 0.12;
@@ -184,7 +216,7 @@ export class Player {
       Audio.play('swing');
     } else {
       const aim = this.aimPoint();
-      const from = new THREE.Vector3(this.pos.x + Math.sin(this.yaw) * 0.7, this.pos.y + 1.95, this.pos.z + Math.cos(this.yaw) * 0.7);
+      const from = new THREE.Vector3(this.pos.x + Math.sin(this.yaw) * 0.7, this.pos.y + (this.mounted ? 2.3 : 1.95), this.pos.z + Math.cos(this.yaw) * 0.7);
       const dir = aim.sub(from).normalize();
       const shots = d.shots || 1;
       for (let i = 0; i < shots; i++) {
@@ -204,17 +236,21 @@ export class Player {
     const w = this.weapon;
     const d = WEAPONS[w.id];
     const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+    const range = d.range + (this.mounted ? 2 : 0);
+    const chest = this.pos.y + 1.3;
     for (const m of enemies()) {
       const dx = m.pos.x - this.pos.x, dz = m.pos.z - this.pos.z;
       const dist = Math.hypot(dx, dz) || 0.001;
-      if (dist > d.range + m.radius) continue;
-      if (Math.abs(m.pos.y - this.pos.y) > 3.5) continue;
+      if (dist > range + m.radius) continue;
+      // vertical gap between your sword arm and the monster's body
+      const gap = Math.max(0, m.pos.y - chest, chest - (m.pos.y + m.height));
+      if (gap > (this.mounted ? 3.5 : 2.2)) continue;
       const dot = (dx * fx + dz * fz) / dist;
       if (dist > m.radius + 0.8 && dot < 0.3) continue;
       hitMonster(m, weaponHit(w), { dir: new THREE.Vector3(dx / dist, 0, dz / dist), knock: 7, fromPlayer: true });
     }
     const col = w.element ? ELEMENTS[w.element].hex : d.glow ?? 0xffffff;
-    FX.slash(tmp.set(this.pos.x, this.pos.y + 1.35, this.pos.z), this.yaw, col, d.range, this.swingSide);
+    FX.slash(tmp.set(this.pos.x, this.pos.y + 1.35, this.pos.z), this.yaw, col, range, this.swingSide);
   }
 
   update(dt) {
@@ -224,6 +260,10 @@ export class Player {
     this.invuln = Math.max(0, this.invuln - dt);
     this.aimT = Math.max(0, this.aimT - dt);
     this.faceLockT = Math.max(0, this.faceLockT - dt);
+    if (this.slowT > 0) {
+      this.slowT -= dt;
+      if (Math.random() < dt * 12) FX.burst(tmp.set(this.pos.x, this.pos.y + 1.2, this.pos.z), { count: 1, color: 0x9fefff, glow: true, speed: 0.8, up: 0.3, size: 0.16, life: 0.5, gravity: 2, spread: 1 });
+    }
 
     if (this.downed > 0) {
       this.downed -= dt;
@@ -247,9 +287,13 @@ export class Player {
     let mz = -cy * iz - sy * ix;
     const ml = Math.hypot(mx, mz);
     if (ml > 1) { mx /= ml; mz /= ml; }
+    if (this.mounted) {
+      this.fly(dt, mx, mz, ml);
+      return;
+    }
     const inWater = world.getHeight(this.pos.x, this.pos.z) < 0.1;
     const sprint = Input.down('ShiftLeft') || Input.down('ShiftRight');
-    const speed = (sprint ? 13 : 8.5) * (inWater ? 0.6 : 1) * (this.aimT > 0 ? 0.8 : 1);
+    const speed = (sprint ? 13 : 8.5) * (inWater ? 0.6 : 1) * (this.aimT > 0 ? 0.8 : 1) * (this.slowT > 0 ? 0.55 : 1);
     this.vel.x = damp(this.vel.x, mx * speed, 12, dt);
     this.vel.z = damp(this.vel.z, mz * speed, 12, dt);
 
@@ -288,15 +332,55 @@ export class Player {
       this.onGround = false;
     }
 
-    // ---- facing ----
+    this.face(dt, mx, mz, ml);
+    this.updateAttacks(dt);
+    this.animate(dt, Math.hypot(this.vel.x, this.vel.z));
+  }
+
+  face(dt, mx, mz, ml) {
+    const cam = G.cam;
     const moving = ml > 0.1 && this.downed <= 0;
     if (this.faceLockT > 0 || this.aimT > 0 || (Input.locked && moving)) {
-      this.yaw = dampAngle(this.yaw, cam.yaw + Math.PI, 18, dt);
+      this.yaw = dampAngle(this.yaw, cam.yaw + Math.PI, this.mounted ? 8 : 18, dt);
     } else if (moving) {
-      this.yaw = dampAngle(this.yaw, Math.atan2(mx, mz), 12, dt);
+      this.yaw = dampAngle(this.yaw, Math.atan2(mx, mz), this.mounted ? 5 : 12, dt);
     }
+  }
 
-    // ---- attacks ----
+  // Riding the winged pet: free flight. Space climbs, Shift dives.
+  fly(dt, mx, mz, ml) {
+    const world = G.world;
+    const pet = G.pet;
+    let up = 0;
+    if (this.downed <= 0) {
+      if (Input.down('Space')) up += 1;
+      if (Input.down('ShiftLeft') || Input.down('ShiftRight') || Input.down('KeyC') || Input.down('ControlLeft')) up -= 1;
+    }
+    const speed = FLY_SPEED * (this.slowT > 0 ? 0.7 : 1) * (this.aimT > 0 ? 0.85 : 1);
+    this.vel.x = damp(this.vel.x, mx * speed, 3.2, dt);
+    this.vel.z = damp(this.vel.z, mz * speed, 3.2, dt);
+    this.vel.y = damp(this.vel.y, up * FLY_CLIMB, 4, dt);
+    this.pos.addScaledVector(this.vel, dt);
+    const lim = HALF - 14;
+    this.pos.x = clamp(this.pos.x, -lim, lim);
+    this.pos.z = clamp(this.pos.z, -lim, lim);
+    const ground = Math.max(world.getHeight(this.pos.x, this.pos.z), -0.15);
+    const seat = pet.seatOffset();
+    if (this.pos.y - seat - ground < 7) world.collide(this.pos, 1.3);
+    const minY = ground + seat + 0.6;
+    if (this.pos.y < minY) {
+      this.pos.y = damp(this.pos.y, minY, 14, dt);
+      if (this.pos.y < minY - 1.5) this.pos.y = minY - 1.5;
+      this.vel.y = Math.max(this.vel.y, 0);
+    }
+    if (this.pos.y > FLY_CEILING) { this.pos.y = FLY_CEILING; this.vel.y = Math.min(0, this.vel.y); }
+    this.onGround = false;
+    this.face(dt, mx, mz, ml);
+    this.updateAttacks(dt);
+    this.animate(dt, 0);
+  }
+
+  updateAttacks(dt) {
     if (this.downed <= 0 && Input.mouseDown && this.attackCd <= 0 && G.state === 'playing') this.attack();
     if (this.swingT > 0) {
       this.swingT += dt / this.swingDur;
@@ -306,8 +390,6 @@ export class Player {
       }
       if (this.swingT >= 1) this.swingT = 0;
     }
-
-    this.animate(dt, Math.hypot(this.vel.x, this.vel.z));
   }
 
   animate(dt, speed) {
@@ -363,6 +445,14 @@ export class Player {
       if (this.weaponObj) this.weaponObj.quaternion.slerp(k ? M.BOW_AIM_Q : M.BOW_IDLE_Q, Math.min(1, dt * 18));
     }
 
+    if (this.mounted) {
+      // sit astride the pet
+      r.hipL.rotation.set(-1.2, 0, -0.5);
+      r.hipR.rotation.set(-1.2, 0, 0.5);
+      r.body.position.y = 0;
+    } else if (r.hipL.rotation.z !== 0) {
+      r.hipL.rotation.z = r.hipR.rotation.z = 0;
+    }
     if (this.downed > 0) {
       r.body.rotation.x = -Math.PI / 2 * Math.min(1, (2.4 - this.downed) * 4);
       r.body.position.y = 0.35;
@@ -370,6 +460,10 @@ export class Player {
       r.body.rotation.x = 0;
     }
     this.root.position.copy(this.pos);
+    if (this.mounted) {
+      this.root.position.y += Math.sin(G.time * 2.2) * 0.12;
+      if (G.pet) this.root.rotation.z = G.pet.roll * 0.6;
+    } else this.root.rotation.z = 0;
     this.root.rotation.y = this.yaw;
     // blink while invulnerable
     this.root.visible = this.invuln <= 0 || Math.floor(this.invuln * 12) % 2 === 0;

@@ -3,14 +3,14 @@ import * as THREE from 'three';
 import { G, enemies, allies } from './game.js';
 import {
   RARITY, ELEMENTS, ELEMENT_KEYS, ELEMENT_BONUS, ENCHANTS, PET_UPGRADES, PETS, WEAPONS, ARMORS,
-  TREAT_COST, REVIVE_COST, MAX_WEAPONS, MAX_ARMORS, itemName, itemRarity, enchantList, weaponDps, sellPrice,
+  TREAT_COST, REVIVE_COST, MAX_WEAPONS, MAX_ARMORS, QUESTS, itemName, itemRarity, enchantList, weaponDps, sellPrice,
 } from './data.js';
 import { itemIcon, getIcon, makePet } from './models.js';
 import { Input } from './input.js';
 import { ROMAN } from './util.js';
 import { Audio } from './audio.js';
 import { BURST_CD } from './pet.js';
-import { HALF, CELL } from './world.js';
+import { HALF, CELL, ISLANDS } from './world.js';
 
 const $ = (id) => document.getElementById(id);
 const proj = new THREE.Vector3();
@@ -21,10 +21,13 @@ const ICON = {
   shield: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z" fill="currentColor"/></svg>',
   heart: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z" fill="currentColor"/></svg>',
   paw: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><ellipse cx="6" cy="10" rx="2.2" ry="2.8" fill="currentColor"/><ellipse cx="10" cy="6" rx="2.2" ry="2.8" fill="currentColor"/><ellipse cx="14.5" cy="6" rx="2.2" ry="2.8" fill="currentColor"/><ellipse cx="18.5" cy="10" rx="2.2" ry="2.8" fill="currentColor"/><path d="M12 11c3 0 6 4.5 6 7 0 2-2 2.6-3.2 2.2-1-.3-1.8-.8-2.8-.8s-1.8.5-2.8.8C8 20.6 6 20 6 18c0-2.5 3-7 6-7z" fill="currentColor"/></svg>',
+  wing: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M2 14c3-1 5-4 6-8 1 3 0 6-1 8 2-1 4-3 5-6 0 3-1 6-3 8 2 0 4-1 6-3-1 3-3 5-6 6 2 .5 4 0 6-1-2 2-5 3-8 3-3 0-6-2-10-7z" fill="currentColor"/></svg>',
+  check: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg>',
   skull: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 2C7 2 3.5 5.6 3.5 10.2c0 2.8 1.3 5 3.5 6.3V20c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2v-3.5c2.2-1.3 3.5-3.5 3.5-6.3C20.5 5.6 17 2 12 2zM8.5 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm7 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4z" fill="currentColor"/></svg>',
 };
 
 const fmt = (n) => Math.floor(n).toLocaleString('en-US');
+const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 function statLine(item) {
   if (item.type === 'armor') {
@@ -71,10 +74,12 @@ export const UI = {
             </div>
           </div>
           <div id="allyList"></div>
+          <div class="card quests" id="questBox"></div>
         </div>
         <div class="hud-top">
           <div id="waveTitle">WAVE 1</div>
           <div id="waveSub"></div>
+          <div id="bossBar" hidden><div class="bb-name"></div><div class="bb-bar"><div class="bb-fill"></div></div></div>
         </div>
         <div class="hud-tr">
           <div class="money" id="moneyBox">${ICON.coin}<span id="money">0</span><span id="moneyPop"></span></div>
@@ -84,6 +89,7 @@ export const UI = {
         <div id="notifs"></div>
         <div class="hud-bl">
           <div class="ability" id="ability"><div class="ab-key" id="abKey">Q</div><div class="ab-cd" id="abCd"></div><div class="ab-txt">Pet Heal</div></div>
+          <div class="ability ride" id="rideAb" hidden><div class="ab-key" id="rideKey">F</div><div class="ab-txt" id="rideTxt">Ride</div></div>
           <div class="hint" id="hint"></div>
         </div>
         <div class="hud-bottom">
@@ -95,12 +101,14 @@ export const UI = {
         <div id="banner"><div class="b-title"></div><div class="b-sub"></div></div>
         <div id="vignette"></div>
         <div id="petVignette"></div>
+        <div id="flash"></div>
       </div>
       <div id="labels"></div>
       <div id="panel" hidden role="dialog" aria-label="Shop"></div>
       <div id="menu"></div>
       <div id="pause" hidden></div>
-      <div id="gameover" hidden></div>`;
+      <div id="gameover" hidden></div>
+      <div id="victory" hidden></div>`;
     document.body.appendChild(root);
     this.labelsEl = $('labels');
     this.mapCtx = $('minimap').getContext('2d');
@@ -124,23 +132,24 @@ export const UI = {
           <span class="pp-blurb">${p.blurb}</span>
         </button>`)
       .join('');
-    let best = 0;
-    try { best = +localStorage.getItem('paw-best-wave') || 0; } catch (e) { best = 0; }
+    let best = 0, bestWin = 0;
+    try { best = +localStorage.getItem('paw-best-wave') || 0; bestWin = +localStorage.getItem('paw-best-win') || 0; } catch (e) { best = 0; }
     const k = (c) => Input.label(c);
     $('menu').innerHTML = `
       <div class="menu-inner">
         <div class="logo"><span class="l1">PETS</span><span class="l2">at</span><span class="l1">WAR</span></div>
-        <p class="tagline">Your pet keeps you alive. Keep your pet alive.</p>
+        <p class="tagline">Your pet keeps you alive. Keep your pet alive.<br><span>Find three Sky Relics, give your pet wings, and ride it into battle against Ignis the Dragon.</span></p>
         <div class="pet-row">${pets}</div>
         <button class="play" id="playBtn">PLAY</button>
-        ${best ? `<div class="best">Best run: wave ${best}</div>` : ''}
+        ${best || bestWin ? `<div class="best">${bestWin ? `Dragon slain in ${fmtTime(bestWin)}` : ''}${best && bestWin ? ' · ' : ''}${best ? `Best wave: ${best}` : ''}</div>` : ''}
         <div class="controls">
           <div><kbd>${k('KeyW')}</kbd><kbd>${k('KeyA')}</kbd><kbd>${k('KeyS')}</kbd><kbd>${k('KeyD')}</kbd> move</div>
           <div><kbd>Mouse</kbd> look · <kbd>Click</kbd> attack</div>
           <div><kbd>Space</kbd> jump · <kbd>Shift</kbd> sprint</div>
           <div><kbd>${k('KeyE')}</kbd> pick up / open / tame</div>
-          <div><kbd>${k('KeyQ')}</kbd> pet heal burst</div>
-          <div><kbd>B</kbd> shop · <kbd>${k('KeyI')}</kbd> backpack · <kbd>1-8</kbd> weapons</div>
+          <div><kbd>${k('KeyQ')}</kbd> pet heal burst · <kbd>F</kbd> ride your pet</div>
+          <div><kbd>B</kbd> shop · <kbd>${k('KeyI')}</kbd> backpack · <kbd>J</kbd> quests</div>
+          <div class="wide">Walk into a portal to travel to another island · riding: <kbd>Space</kbd> climb, <kbd>Shift</kbd> dive</div>
         </div>
         <div class="menu-opts">
           <button class="opt" id="qualBtn">Graphics: ${G.quality === 'high' ? 'High' : 'Fast'}</button>
@@ -164,6 +173,7 @@ export const UI = {
     $('menu').hidden = false;
     $('hud').hidden = true;
     $('gameover').hidden = true;
+    $('victory').hidden = true;
     $('pause').hidden = true;
     $('panel').hidden = true;
     this.clearLabels();
@@ -172,7 +182,9 @@ export const UI = {
     $('menu').hidden = true;
     $('hud').hidden = false;
     $('gameover').hidden = true;
+    $('victory').hidden = true;
     $('notifs').innerHTML = '';
+    this.refreshQuests();
     const pet = G.pet;
     $('petPortrait').src = getIcon('pet:' + pet.id, () => makePet(pet.id).root, 'front');
     $('petName').textContent = `${pet.name} the ${pet.def.species}`;
@@ -196,7 +208,8 @@ export const UI = {
         </div>
         <div class="controls compact">
           <div><kbd>${k('KeyW')}</kbd><kbd>${k('KeyA')}</kbd><kbd>${k('KeyS')}</kbd><kbd>${k('KeyD')}</kbd> move · <kbd>Space</kbd> jump</div>
-          <div><kbd>${k('KeyE')}</kbd> interact · <kbd>${k('KeyQ')}</kbd> pet heal · <kbd>B</kbd> shop</div>
+          <div><kbd>${k('KeyE')}</kbd> interact · <kbd>${k('KeyQ')}</kbd> pet heal · <kbd>F</kbd> ride · <kbd>B</kbd> shop · <kbd>J</kbd> quests</div>
+          <div>Riding: <kbd>Space</kbd> climb · <kbd>Shift</kbd> dive</div>
         </div>
       </div>`;
     $('pause').hidden = false;
@@ -231,6 +244,66 @@ export const UI = {
     $('gameover').hidden = false;
     $('againBtn').addEventListener('click', () => this.handlers.start());
     $('menuBtn').addEventListener('click', () => this.handlers.quit());
+  },
+
+  showVictory(bestTime) {
+    const s = G.stats;
+    const pet = G.pet;
+    $('victory').innerHTML = `
+      <div class="modal go win">
+        <img class="go-pet" src="${getIcon('pet:' + pet.id, () => makePet(pet.id).root, 'front')}" alt="" />
+        <div class="win-kicker">Victory</div>
+        <h2>Ignis the Dragon is slain</h2>
+        <p class="muted">${pet.name} and you saved the islands. The skies are yours.</p>
+        <div class="go-stats">
+          <div><b>${fmtTime(s.time)}</b><span>time to win</span></div>
+          <div><b>${s.kills}</b><span>monsters defeated</span></div>
+          <div><b>${s.bosses}</b><span>bosses beaten</span></div>
+          <div><b>${s.wave}</b><span>wave reached</span></div>
+          <div><b>${s.tamed}</b><span>monsters tamed</span></div>
+          <div><b>${fmtTime(bestTime)}</b><span>best win</span></div>
+        </div>
+        <div class="go-btns">
+          <button class="play small" id="winAgain">Play again</button>
+          <button class="opt" id="winMenu">Change pet</button>
+        </div>
+      </div>`;
+    $('victory').hidden = false;
+    $('winAgain').addEventListener('click', () => this.handlers.start());
+    $('winMenu').addEventListener('click', () => this.handlers.quit());
+  },
+
+  keyLabel(code) { return Input.label(code); },
+
+  flash(color = '#ffffff') {
+    const f = $('flash');
+    f.style.setProperty('--c', color);
+    f.classList.remove('on');
+    void f.offsetWidth;
+    f.classList.add('on');
+  },
+
+  // Quest tracker under the minimap.
+  refreshQuests() {
+    const Q = this.handlers.quests && this.handlers.quests();
+    if (!Q || !$('questBox')) return;
+    let html = '';
+    if (Q.stage === 'relics' || Q.stage === 'empower') {
+      html += `<div class="q-head">${ICON.wing}<span>Sky Relics ${Q.relics()}/3</span></div>`;
+      for (const q of QUESTS) {
+        const done = Q.done[q.id];
+        const prog = q.goal && !done ? ` <em>${Q.feathers}/${q.goal}</em>` : '';
+        html += `<div class="q-row${done ? ' done' : ''}" style="--qc:${q.color}"><i>${done ? ICON.check : ''}</i><span>${q.title}${prog}</span></div>`;
+      }
+      if (Q.stage === 'empower') html += `<div class="q-row next"><i>!</i><span>Return to the Elder at the shrine</span></div>`;
+    } else if (Q.stage === 'dragon') {
+      html += `<div class="q-head dragon">${ICON.wing}<span>Final quest</span></div>
+        <div class="q-row next" style="--qc:#ff6a4a"><i>!</i><span>Slay Ignis the Dragon on Dragon's Roost</span></div>
+        <div class="q-tip">Ride with <kbd>F</kbd> · Frost hurts it most</div>`;
+    } else {
+      html += `<div class="q-head">${ICON.check}<span>The islands are free</span></div>`;
+    }
+    $('questBox').innerHTML = html;
   },
 
   // ---------- HUD pieces ----------
@@ -343,12 +416,25 @@ export const UI = {
       d.el.remove();
     }
   },
+  worldLabel(html) {
+    const el = document.createElement('div');
+    el.className = 'wlabel';
+    el.innerHTML = html;
+    el.hidden = true;
+    this.labelsEl.appendChild(el);
+    return el;
+  },
   clearLabels() {
     for (const [, el] of this.labels) el.remove();
     this.labels.clear();
     for (const d of this.dmgs) d.el.remove();
     this.dmgs.length = 0;
-    if (this.merchantEl) { this.merchantEl.remove(); this.merchantEl = null; }
+    if (this.merchantEl) {
+      this.merchantEl.remove();
+      this.elderEl.remove();
+      for (const el of this.portalEls) el.remove();
+      this.merchantEl = null;
+    }
   },
   updateLabels(dt) {
     const cam = G.camera;
@@ -357,7 +443,7 @@ export const UI = {
       if (m.dead) continue;
       const d = cam.position.distanceTo(m.pos);
       const low = m.hp / m.maxHp;
-      const show = m.ally || m.def.boss || d < 45;
+      const show = (m.ally && d < 120) || (m.def.boss && d < (m.def.flying ? 220 : 120)) || d < 45;
       if (!show) continue;
       const sp = this.toScreen(proj.set(m.pos.x, m.pos.y + m.height + 0.45, m.pos.z));
       if (!sp) continue;
@@ -365,19 +451,19 @@ export const UI = {
       let el = this.labels.get(m);
       if (!el) {
         el = document.createElement('div');
-        el.className = 'mlabel' + (m.def.boss ? ' boss' : '');
+        el.className = 'mlabel' + (m.def.boss ? ' boss ' + m.type : '');
         el.innerHTML = `<div class="ml-name"></div><div class="ml-bar"><div class="ml-fill"></div></div>`;
         this.labelsEl.appendChild(el);
         this.labels.set(m, el);
         el._state = '';
       }
       const canTame = m.tameable && !m.ally && low <= 0.35;
-      const state = `${m.ally ? 'a' : 'e'}${canTame ? 't' : ''}${m.level}`;
+      const state = `${m.ally ? 'a' : 'e'}${canTame ? 't' : ''}${m.level}${m.dormant ? 'z' : ''}`;
       if (el._state !== state) {
         el._state = state;
         el.classList.toggle('ally', m.ally);
         el.classList.toggle('tame', canTame);
-        el.querySelector('.ml-name').innerHTML = (m.ally ? ICON.heart : canTame ? ICON.paw : '') + `<span>${m.def.name}</span><em>Lv ${m.level}</em>`;
+        el.querySelector('.ml-name').innerHTML = (m.ally ? ICON.heart : canTame ? ICON.paw : '') + `<span>${m.def.name}</span>${m.def.fixedLevel ? '' : `<em>Lv ${m.level}</em>`}${m.dormant ? '<em>asleep</em>' : ''}`;
       }
       el.querySelector('.ml-fill').style.width = `${Math.max(0, low) * 100}%`;
       const scale = Math.max(0.6, Math.min(1.1, 22 / d));
@@ -390,22 +476,43 @@ export const UI = {
         this.labels.delete(m);
       }
     }
-    // merchant tag
+    // merchant, Elder and portal tags
     if (G.world) {
       if (!this.merchantEl) {
-        this.merchantEl = document.createElement('div');
-        this.merchantEl.className = 'wlabel';
-        this.merchantEl.innerHTML = `<b>Merchant</b><span>Press B to shop</span>`;
-        this.labelsEl.appendChild(this.merchantEl);
+        this.merchantEl = this.worldLabel('<b>Merchant</b><span>Press B to shop</span>');
+        this.elderEl = this.worldLabel('<b class="elder">Elder</b><span>Press E to talk</span>');
+        this.portalEls = G.world.portals.map(() => this.worldLabel(''));
       }
-      const mp = G.world.merchantPos;
-      const sp = this.toScreen(proj.set(mp.x, mp.y + 4.9, mp.z));
-      const d = G.player ? G.player.pos.distanceTo(mp) : 99;
       const calm = this.handlers.waves().state === 'prep';
-      if (sp && (d < 18 || (calm && d < 55))) {
-        this.merchantEl.hidden = false;
-        this.merchantEl.style.transform = `translate(${sp.x}px, ${sp.y}px) translate(-50%, -100%)`;
-      } else this.merchantEl.hidden = true;
+      const pp = G.player ? G.player.pos : cam.position;
+      const place = (el, pos, yOff, maxD) => {
+        const sp = this.toScreen(proj.set(pos.x, pos.y + yOff, pos.z));
+        const d = pp.distanceTo(pos);
+        if (sp && d < maxD) {
+          el.hidden = false;
+          el.style.transform = `translate(${sp.x}px, ${sp.y}px) translate(-50%, -100%)`;
+        } else el.hidden = true;
+      };
+      place(this.merchantEl, G.world.merchantPos, 4.9, calm ? 55 : 18);
+      const Q = this.handlers.quests();
+      const ready = Q.stage === 'empower';
+      if (this.elderEl._ready !== ready) {
+        this.elderEl._ready = ready;
+        this.elderEl.classList.toggle('alert', ready);
+        this.elderEl.innerHTML = ready ? '<i class="bang">!</i><b class="elder">Elder</b><span>Bring the relics here</span>' : '<b class="elder">Elder</b><span>Press E to talk</span>';
+      }
+      place(this.elderEl, G.world.elderPos, 4.4, ready ? 140 : calm ? 50 : 20);
+      G.world.portals.forEach((pt, i) => {
+        const el = this.portalEls[i];
+        const key = `${pt.sealed}`;
+        if (el._key !== key) {
+          el._key = key;
+          const to = ISLANDS[pt.dest];
+          el.classList.toggle('sealed', pt.sealed);
+          el.innerHTML = pt.sealed ? `<b style="color:#ff6a7a">Sealed</b><span>${to.name}</span>` : `<b style="color:${to.color}">${to.name}</b><span>Portal</span>`;
+        }
+        place(el, pt, 6.6, 40);
+      });
     }
     // damage numbers
     for (let i = this.dmgs.length - 1; i >= 0; i--) {
@@ -452,15 +559,51 @@ export const UI = {
     }
     $('kills').textContent = G.stats.kills;
 
-    // wave
+    // wave (on Haven) or location name (elsewhere)
     const W = this.handlers.waves();
-    if (W.state === 'prep') {
-      $('waveTitle').textContent = W.n === 0 ? 'GET READY' : `WAVE ${W.n} CLEARED`;
-      $('waveSub').textContent = `Wave ${W.n + 1} in ${Math.ceil(W.timer)}s`;
+    const isl = G.playerIsland;
+    if (isl === 'haven') {
+      if (W.state === 'prep') {
+        $('waveTitle').textContent = W.n === 0 ? 'GET READY' : `WAVE ${W.n} CLEARED`;
+        $('waveSub').textContent = `Wave ${W.n + 1} in ${Math.ceil(W.timer)}s`;
+      } else {
+        $('waveTitle').textContent = `WAVE ${W.n}`;
+        const rem = W.remaining();
+        $('waveSub').textContent = `${rem} monster${rem === 1 ? '' : 's'} left`;
+      }
+      $('waveTitle').style.color = '';
     } else {
-      $('waveTitle').textContent = `WAVE ${W.n}`;
-      const rem = W.remaining();
-      $('waveSub').textContent = `${rem} monster${rem === 1 ? '' : 's'} left`;
+      const I = isl ? ISLANDS[isl] : null;
+      $('waveTitle').textContent = I ? I.name.toUpperCase() : 'OPEN SEA';
+      $('waveTitle').style.color = I ? I.color : '#9fd8ff';
+      $('waveSub').textContent = W.n > 0 || W.state === 'active' ? 'Haven waves wait for your return' : I ? I.sub : 'Flying between the islands';
+    }
+
+    // boss health bar: the closest boss that is awake
+    let boss = null, bd = 1e9;
+    for (const m of enemies()) {
+      if (!m.def.boss || m.dormant) continue;
+      const d = m.pos.distanceTo(p.pos);
+      if (d < (m.def.flying ? 200 : 75) && d < bd) { bd = d; boss = m; }
+    }
+    const bb = $('bossBar');
+    if (boss) {
+      bb.hidden = false;
+      if (bb._m !== boss) {
+        bb._m = boss;
+        bb.querySelector('.bb-name').textContent = boss.def.name;
+        bb.className = boss.type;
+      }
+      bb.querySelector('.bb-fill').style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`;
+    } else bb.hidden = true;
+
+    // ride button
+    const ride = $('rideAb');
+    ride.hidden = !pet.winged;
+    if (pet.winged) {
+      $('rideKey').textContent = Input.label('KeyF');
+      $('rideTxt').textContent = p.mounted ? 'Land' : 'Ride';
+      ride.classList.toggle('ready', !p.mounted);
     }
 
     // pet ability
@@ -475,7 +618,10 @@ export const UI = {
     });
 
     $('crosshair').classList.toggle('on', Input.locked || Input.touchActive);
-    this.setHint(Input.locked || Input.touchActive ? '' : 'Click the game to lock the mouse, or hold right-click and drag to turn the camera.');
+    this.setHint(
+      !Input.locked && !Input.touchActive ? 'Click the game to lock the mouse, or hold right-click and drag to turn the camera.'
+        : p.mounted ? `Flying · Space climb · Shift dive · ${Input.label('KeyF')} land` : ''
+    );
     this.updateLabels(dt);
     this.drawMinimap();
   },
@@ -484,7 +630,10 @@ export const UI = {
     const ctx = this.mapCtx;
     const W = 190, R = W / 2;
     const p = G.player;
-    const range = 70; // world units from centre to edge
+    // zoom out while flying so the other islands show up
+    const want = p.mounted ? 170 : 70;
+    this.mapRange = (this.mapRange || 70) + (want - (this.mapRange || 70)) * 0.08;
+    const range = this.mapRange;
     const scale = R / range;
     const yaw = G.cam.yaw;
     ctx.save();
@@ -492,9 +641,8 @@ export const UI = {
     ctx.beginPath();
     ctx.arc(R, R, R - 2, 0, Math.PI * 2);
     ctx.clip();
-    ctx.fillStyle = '#2a7fb8';
+    ctx.fillStyle = '#2a70b0';
     ctx.fillRect(0, 0, W, W);
-    // rotate so camera-forward is up
     ctx.translate(R, R);
     ctx.rotate(yaw);
     ctx.save();
@@ -503,35 +651,50 @@ export const UI = {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(G.world.mapCanvas, 0, 0);
     ctx.restore();
+    const sx = (x) => (x - p.pos.x) * scale, sz = (z) => (z - p.pos.z) * scale;
     const dot = (x, z, r, color, stroke) => {
-      const dx = (x - p.pos.x) * scale, dz = (z - p.pos.z) * scale;
       ctx.beginPath();
-      ctx.arc(dx, dz, r, 0, Math.PI * 2);
+      ctx.arc(sx(x), sz(z), r, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
       if (stroke) { ctx.lineWidth = 1.5; ctx.strokeStyle = stroke; ctx.stroke(); }
     };
-    for (const pt of G.world.portals) dot(pt.x, pt.z, 4.5, '#b45cff', '#2a1040');
-    dot(G.world.merchantPos.x, G.world.merchantPos.z, 4, '#ffcf4a', '#3a2a00');
+    const diamond = (x, z, r, color) => {
+      ctx.save();
+      ctx.translate(sx(x), sz(z));
+      ctx.rotate(Math.PI / 4 - yaw);
+      ctx.fillStyle = color;
+      ctx.strokeStyle = '#1a0f00';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(-r, -r, r * 2, r * 2);
+      ctx.strokeRect(-r, -r, r * 2, r * 2);
+      ctx.restore();
+    };
+    for (const pt of G.world.portals) dot(pt.x, pt.z, 4.5, pt.sealed ? '#3a2030' : '#' + pt.colors.c2.toString(16).padStart(6, '0'), pt.sealed ? '#ff4a6a' : '#10122a');
+    if (G.playerIsland === 'haven' || p.mounted) {
+      dot(G.world.merchantPos.x, G.world.merchantPos.z, 4, '#ffcf4a', '#3a2a00');
+      const ready = this.handlers.quests().stage === 'empower';
+      dot(G.world.elderPos.x, G.world.elderPos.z, ready ? 5.5 : 4, ready ? '#7dffb0' : '#9fd0ff', '#0a2a20');
+    }
     for (const c of G.chests) if (!c.opened) dot(c.pos.x, c.pos.z, 4, '#ffd24a', '#ffffff');
     for (const d of G.drops) dot(d.pos.x, d.pos.z, 3, RARITY[itemRarity(d.item)].color, '#000');
+    for (const f of this.handlers.regions().feathers) if (!f.collected) diamond(f.pos.x, f.pos.z, 3.6, '#ff9a2a');
     // Monsters are revealed near you, near your pet, and near tamed allies (they scout for you).
     const scouts = [p.pos, G.pet.pos, ...allies().map((a) => a.pos)];
     for (const m of enemies()) {
       let seen = m.def.boss;
       for (const s of scouts) if (!seen && Math.hypot(m.pos.x - s.x, m.pos.z - s.z) < 32) seen = true;
-      if (seen) dot(m.pos.x, m.pos.z, m.def.boss ? 5.5 : 3, '#ff4a4a', '#3a0000');
+      if (seen) dot(m.pos.x, m.pos.z, m.def.boss ? 5.5 : 3, m.def.flying ? '#ff8a2a' : '#ff4a4a', '#3a0000');
     }
     for (const a of allies()) {
       dot(a.pos.x, a.pos.z, 3.5, '#4fb4ff', '#ffffff');
-      // scouting radius
       ctx.beginPath();
-      ctx.arc((a.pos.x - p.pos.x) * scale, (a.pos.z - p.pos.z) * scale, 32 * scale, 0, Math.PI * 2);
+      ctx.arc(sx(a.pos.x), sz(a.pos.z), 32 * scale, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(79,180,255,0.35)';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-    dot(G.pet.pos.x, G.pet.pos.z, 3.5, '#5effa8', '#0a3a20');
+    if (!G.pet.mounted) dot(G.pet.pos.x, G.pet.pos.z, 3.5, '#5effa8', '#0a3a20');
     ctx.restore();
     // player arrow (always pointing up, rotated by facing relative to camera)
     ctx.save();
@@ -543,7 +706,7 @@ export const UI = {
     ctx.lineTo(0, 2.5);
     ctx.lineTo(-5, 5);
     ctx.closePath();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = p.mounted ? '#8fe8ff' : '#ffffff';
     ctx.fill();
     ctx.strokeStyle = '#10182a';
     ctx.lineWidth = 1.5;
@@ -564,7 +727,7 @@ export const UI = {
   renderPanel() {
     const p = G.player, pet = G.pet;
     const tabs = [
-      ['weapons', 'Weapons'], ['armor', 'Armor'], ['enchant', 'Enchants'],
+      ['quests', 'Quests'], ['weapons', 'Weapons'], ['armor', 'Armor'], ['enchant', 'Enchants'],
       ['element', 'Elements'], ['pet', 'Pet Care'], ['backpack', 'Backpack'],
     ];
     const tabHtml = tabs.map(([k, n]) => `<button class="tab${this.panelTab === k ? ' on' : ''}" data-tab="${k}">${n}</button>`).join('');
@@ -586,7 +749,30 @@ export const UI = {
         : `<button class="buy${G.money >= cost ? '' : ' poor'}" data-act="${action}" data-arg="${arg}">${label}<span>${ICON.coin}${fmt(cost)}</span></button>`;
     const held = p.weapon;
 
-    if (this.panelTab === 'weapons') {
+    if (this.panelTab === 'quests') {
+      const Q = this.handlers.quests();
+      const elderSays = {
+        relics: `Ignis the Dragon sleeps on Dragon's Roost, and the monsters pouring out of our portals answer to it. Only a pet with <b>Sky Wings</b> can carry you to fight it in the sky. Bring me the three <b>Sky Relics</b> and I will awaken ${pet.name}'s wings.`,
+        empower: `You found all three Sky Relics! Stand beside me and I will awaken ${pet.name}'s wings.`,
+        dragon: `${pet.name} can fly! Press <kbd>${Input.label('KeyF')}</kbd> to ride, <kbd>Space</kbd> to climb and <kbd>Shift</kbd> to dive. Ignis is awake on Dragon's Roost: the red portal is open, or fly there yourself. Frost hurts it most, and its wounds never heal, so fly back to the merchant for pet treats whenever you need to.`,
+        won: 'The dragon is gone and the islands are safe. Thank you, hero.',
+      }[Q.stage];
+      const rows = QUESTS.map((q) => {
+        const done = Q.done[q.id];
+        const prog = q.goal ? `<div class="qbar"><div style="width:${(Math.min(Q.feathers, q.goal) / q.goal) * 100}%"></div></div><span class="muted">${Math.min(Q.feathers, q.goal)} / ${q.goal} feathers</span>` : '';
+        return `<div class="qcard${done ? ' done' : ''}" style="--qc:${q.color}">
+          <div class="qc-check">${done ? ICON.check : ''}</div>
+          <div class="qc-body"><div class="qc-relic">${q.relic}</div><div class="qc-title">${q.title}</div><div class="qc-where">${q.where}</div>${prog}</div>
+          <div class="qc-state">${done ? 'Found' : 'To do'}</div></div>`;
+      }).join('');
+      const finalRow = `<div class="qcard final${Q.stage === 'won' ? ' done' : ''}" style="--qc:#ff6a4a">
+          <div class="qc-check">${Q.stage === 'won' ? ICON.check : ICON.wing}</div>
+          <div class="qc-body"><div class="qc-relic">Final quest</div><div class="qc-title">Ride ${pet.name} and slay Ignis the Dragon</div>
+          <div class="qc-where">${Q.stage === 'relics' || Q.stage === 'empower' ? 'Unlocks once your pet has Sky Wings' : "Dragon's Roost · red portal, or fly there"}</div></div>
+          <div class="qc-state">${Q.stage === 'won' ? 'Done' : Q.stage === 'dragon' ? 'Go!' : 'Locked'}</div></div>`;
+      const btn = Q.stage === 'empower' ? `<button class="play small empower" data-act="empower">Awaken Sky Wings</button>` : '';
+      body = `<div class="elder-say"><div class="es-who">The Elder</div><p>${elderSays}</p>${btn}</div><div class="qlist">${rows}${finalRow}</div>`;
+    } else if (this.panelTab === 'weapons') {
       body = `<p class="tab-note">New weapons go into your hotbar (${p.weapons.length}/${MAX_WEAPONS} slots used).</p><div class="grid">` +
         Object.entries(WEAPONS)
           .filter(([, d]) => d.price > 0)
@@ -682,7 +868,7 @@ export const UI = {
     $('panel').innerHTML = `
       <div class="panel-inner">
         <header>
-          <div class="ph-title">${this.panelTab === 'backpack' ? 'Backpack' : "Merchant's Stall"}</div>
+          <div class="ph-title">${this.panelTab === 'backpack' ? 'Backpack' : this.panelTab === 'quests' ? 'Quest Journal' : "Merchant's Stall"}</div>
           <div class="ph-money">${ICON.coin}<span>${fmt(G.money)}</span></div>
           <button class="close" data-act="close" aria-label="Close">Close <kbd>B</kbd></button>
         </header>
@@ -717,9 +903,11 @@ export const UI = {
       sell: () => shopApi.sell(+arg),
       equipW: () => shopApi.equipWeapon(+arg),
       equipA: () => shopApi.equipArmor(+arg),
+      empower: () => this.handlers.empower(),
     }[act];
     if (!fn) return;
     const err = fn();
+    if (act === 'empower' && !err) return;
     this.panelMsg = err || '';
     const scroll = $('panel').querySelector('.panel-body')?.scrollTop || 0;
     this.renderPanel();

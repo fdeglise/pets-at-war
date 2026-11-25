@@ -63,6 +63,14 @@ const SOUNDS = {
   down: (t) => [500, 400, 300, 200].forEach((f, i) => tone(t + i * 0.1, f, 0.18, 'triangle', 0.14)),
   gameover: (t) => [392, 330, 262, 196].forEach((f, i) => tone(t + i * 0.25, f, 0.5, 'triangle', 0.16)),
   click: (t) => tone(t, 800, 0.05, 'square', 0.05),
+  portal: (t) => { noise(t, 0.7, 300, 0.25, 'bandpass', 2, 3000); tone(t, 220, 0.7, 'sine', 0.16, 880); tone(t + 0.1, 330, 0.6, 'triangle', 0.08, 1320); },
+  roar: (t) => { noise(t, 1.4, 260, 0.5, 'lowpass', 3, 90); tone(t, 95, 1.3, 'sawtooth', 0.2, 50); tone(t + 0.05, 140, 1.1, 'square', 0.07, 70); },
+  breath: (t) => noise(t, 0.35, 700, 0.18, 'bandpass', 0.6, 300),
+  boom: (t) => { noise(t, 0.9, 200, 0.6, 'lowpass', 1, 40); tone(t, 60, 0.7, 'sine', 0.4, 28); },
+  wings: (t) => { noise(t, 0.12, 500, 0.2, 'lowpass', 1); noise(t + 0.18, 0.12, 500, 0.16, 'lowpass', 1); },
+  relic: (t) => [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(t + i * 0.09, f, 0.4, 'triangle', 0.15)),
+  empower: (t) => { [392, 523, 659, 784, 1047].forEach((f, i) => tone(t + i * 0.12, f, 0.7, 'sine', 0.16)); noise(t, 1.2, 2000, 0.1, 'highpass', 1); },
+  victory: (t) => [523, 659, 784, 1047, 784, 1047, 1319, 1568].forEach((f, i) => tone(t + i * 0.14, f, 0.5, 'triangle', 0.17)),
   error: (t) => tone(t, 180, 0.15, 'square', 0.08),
 };
 

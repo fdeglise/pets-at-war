@@ -58,10 +58,12 @@ export const Waves = {
   },
 
   remaining() {
-    return this.queue.length + enemies().length;
+    return this.queue.length + enemies().filter((m) => m.wave).length;
   },
 
+  // Waves only run while you're on Haven Isle; they wait for you when you travel.
   update(dt) {
+    if (G.playerIsland !== 'haven') return;
     if (this.state === 'prep') {
       this.timer -= dt;
       if (this.timer <= 0) this.start(this.n + 1);
@@ -69,7 +71,8 @@ export const Waves = {
       this.spawnT -= dt;
       if (this.spawnT <= 0 && this.queue.length && enemies().length < MAX_ALIVE) {
         const type = this.queue.shift();
-        const portal = G.world.portals[Math.floor(Math.random() * G.world.portals.length)];
+        const gates = G.world.portals.filter((p) => p.island === 'haven');
+        const portal = gates[Math.floor(Math.random() * gates.length)];
         const toC = Math.atan2(-portal.x, -portal.z);
         const pos = new THREE.Vector3(
           portal.x + Math.sin(toC) * 3 + (Math.random() - 0.5) * 3,
@@ -77,7 +80,7 @@ export const Waves = {
           portal.z + Math.cos(toC) * 3 + (Math.random() - 0.5) * 3
         );
         pos.y = G.world.getHeight(pos.x, pos.z);
-        spawnMonster(type, pos, this.n);
+        spawnMonster(type, pos, this.n, { island: 'haven', wave: true });
         portal.glow = 1;
         FX.burst(new THREE.Vector3(portal.x, portal.y + 3.1, portal.z), { count: 14, color: 0xd07bff, glow: true, speed: 4, size: 0.22, life: 0.7 });
         if (type === 'ogre') {
@@ -87,7 +90,7 @@ export const Waves = {
         // early waves trickle in slowly
         this.spawnT = this.interval * (0.6 + Math.random() * 0.8);
       }
-      if (!this.queue.length && enemies().length === 0) {
+      if (!this.queue.length && enemies().filter((m) => m.wave).length === 0) {
         this.state = 'prep';
         this.timer = 12;
         const bonus = 15 + this.n * 10;
@@ -102,8 +105,8 @@ export const Waves = {
     this.chestT -= dt;
     if (this.chestT <= 0) {
       this.chestT = 35 + Math.random() * 25;
-      if (G.chests.filter((c) => !c.opened).length < 3) {
-        spawnChest(G.world.randomLandPoint(28, 92));
+      if (G.chests.filter((c) => !c.opened && Math.hypot(c.pos.x, c.pos.z) < 130).length < 3) {
+        spawnChest(G.world.randomLandPoint('haven', 28, 92));
         UI.notify('A treasure chest appeared! Check your map.', '#ffd24a');
       }
     }

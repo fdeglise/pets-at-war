@@ -24,6 +24,7 @@ export function weaponHit(item) {
 
 export function hitMonster(m, hit, opts = {}) {
   if (m.dead) return 0;
+  if (m.dormant) m.wake();
   let dmg = hit.dmg;
   let tag = null;
   if (hit.element) {
@@ -93,6 +94,13 @@ export function spawnProjectile(o) {
   let obj;
   if (o.kind === 'fireball') {
     obj = new THREE.Mesh(M.cached('projFB', () => new THREE.IcosahedronGeometry(0.32, 1)), M.cached('projFBm', () => M.glowMat(0xff7a2a, 3)));
+  } else if (o.kind === 'dragonfire') {
+    obj = new THREE.Group();
+    obj.add(new THREE.Mesh(M.cached('projDF', () => new THREE.IcosahedronGeometry(0.9, 1)), M.cached('projDFm', () => M.glowMat(0xff8a2a, 3.4))));
+    obj.add(new THREE.Mesh(M.cached('projDF2', () => new THREE.IcosahedronGeometry(0.55, 1)), M.cached('projDFm2', () => M.glowMat(0xfff0a0, 4))));
+  } else if (o.kind === 'iceboulder') {
+    obj = new THREE.Mesh(M.cached('projIB', () => new THREE.IcosahedronGeometry(0.95, 0)), M.cached('projIBm', () => M.std(0xc4ecff, { rough: 0.15, metal: 0.1, emissive: 0x2a7fc0, ei: 0.5, flat: true })));
+    obj.castShadow = true;
   } else if (o.kind === 'bonearrow') {
     obj = M.makeArrow(0xd8ccb0, 0xff5a3a);
   } else {
@@ -103,8 +111,8 @@ export function spawnProjectile(o) {
   const p = {
     obj, team: o.team, kind: o.kind, pos: o.pos.clone(), vel: o.vel.clone(), prev: o.pos.clone(),
     hit: o.hit, dmg: o.dmg ?? 0, owner: o.owner, gravity: o.gravity ?? 0, life: o.life ?? 3,
-    radius: o.radius ?? 0.35, stuck: 0, fromPlayer: o.team === 'player',
-    trail: o.hit && o.hit.element ? ELEMENTS[o.hit.element].hex : o.kind === 'fireball' ? 0xff7a2a : null,
+    radius: o.radius ?? 0.35, stuck: 0, fromPlayer: o.team === 'player', aoe: o.aoe ?? 0, slow: o.slow ?? 0,
+    trail: o.hit && o.hit.element ? ELEMENTS[o.hit.element].hex : o.kind === 'fireball' || o.kind === 'dragonfire' ? 0xff7a2a : o.kind === 'iceboulder' ? 0x9fefff : null,
   };
   G.projectiles.push(p);
   return p;
@@ -149,15 +157,17 @@ export function updateProjectiles(dt) {
     p.obj.position.copy(p.pos);
     tmp.copy(p.pos).add(p.vel);
     p.obj.lookAt(tmp);
-    if (p.kind === 'fireball') p.obj.rotation.z += dt * 10;
-    if (p.trail && Math.random() < 0.7) FX.burst(p.pos, { count: 1, color: p.trail, glow: true, speed: 0.5, up: 0.5, size: p.kind === 'fireball' ? 0.3 : 0.14, life: 0.3, gravity: 0 });
+    if (p.kind === 'fireball' || p.kind === 'dragonfire' || p.kind === 'iceboulder') p.obj.rotation.z += dt * 10;
+    const big = p.kind === 'dragonfire';
+    if (p.trail && Math.random() < (big ? 1 : 0.7)) FX.burst(p.pos, { count: big ? 3 : 1, color: p.trail, glow: true, speed: big ? 1.5 : 0.5, up: 0.5, size: big ? 0.7 : p.kind === 'fireball' ? 0.3 : p.kind === 'iceboulder' ? 0.35 : 0.14, size1: big ? 1.1 : 0, life: big ? 0.5 : 0.3, gravity: 0, spread: big ? 0.8 : 0.2 });
 
     let hitSomething = false;
     if (p.team === 'enemy') {
       for (const f of friendly) {
         const c = tmp2.set(f.pos.x, f.pos.y + f.height * 0.5, f.pos.z);
         if (segSphere(p.prev, p.pos, c, f.radius + p.radius + 0.25)) {
-          f.takeHit(p.dmg, p.owner);
+          if (p.aoe) explode(p, friendly);
+          else f.takeHit(p.dmg, p.owner);
           hitSomething = true;
           break;
         }
@@ -184,8 +194,11 @@ export function updateProjectiles(dt) {
       continue;
     }
     const gh = world.getHeight(p.pos.x, p.pos.z);
-    if (p.pos.y < gh) {
-      if (p.kind === 'fireball') {
+    if (p.pos.y < Math.max(gh, p.aoe ? -0.2 : -99)) {
+      if (p.aoe) {
+        explode(p, friendly);
+        removeProjectile(i);
+      } else if (p.kind === 'fireball') {
         FX.burst(p.pos, { count: 12, color: 0xff7a2a, glow: true, speed: 5, size: 0.22, life: 0.45 });
         removeProjectile(i);
       } else {
@@ -196,6 +209,25 @@ export function updateProjectiles(dt) {
       }
     }
   }
+}
+
+// Splash damage for big projectiles (ice boulders, dragon fireballs).
+function explode(p, friendly) {
+  const fire = p.kind === 'dragonfire';
+  for (const f of friendly) {
+    const c = tmp2.set(f.pos.x, f.pos.y + f.height * 0.5, f.pos.z);
+    if (c.distanceTo(p.pos) < p.aoe + f.radius) {
+      f.takeHit(p.dmg, p.owner);
+      if (p.slow && f.slowFor) f.slowFor(p.slow);
+    }
+  }
+  const at = tmp.copy(p.pos);
+  FX.burst(at, { count: fire ? 40 : 26, color: fire ? 0xff7a2a : 0x9fefff, glow: true, speed: fire ? 11 : 8, up: 2, size: fire ? 0.5 : 0.3, size1: fire ? 0.2 : 0, life: 0.7, gravity: 4 });
+  FX.burst(at, { count: 14, color: fire ? 0x3a2a24 : 0xe8f6ff, speed: 7, size: 0.4, life: 0.8, floor: true });
+  at.y = G.world.getHeight(at.x, at.z);
+  FX.ring(at, fire ? 0xff6a1a : 0x8fe8ff, p.aoe, 0.45);
+  Audio.play(fire ? 'boom' : 'slam');
+  if (G.player && G.player.pos.distanceTo(p.pos) < 25) G.shake = Math.max(G.shake, 0.3);
 }
 
 // Melee/AoE helper for monsters: who can a monster hurt?

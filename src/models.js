@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { WEAPONS, ARMORS, ELEMENTS } from './data.js';
+import { makeTitan, makeDragon } from './bigModels.js';
 
 // ---------- shared helpers ----------
 const gcache = new Map();
@@ -670,6 +671,8 @@ export function makeMonster(type) {
     case 'imp': return makeImp();
     case 'skeleton': return makeSkeleton();
     case 'golem': return makeGolem();
+    case 'titan': return makeTitan();
+    case 'dragon': return makeDragon();
     default: return makeOgre();
   }
 }
