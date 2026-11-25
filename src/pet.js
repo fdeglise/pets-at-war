@@ -1,6 +1,6 @@
 // The pet: follows the player, heals them, and pays HP to revive them. If it dies, the run ends.
 import * as THREE from 'three';
-import { G, enemies } from './game.js';
+import { G, enemies, diff, inShelter } from './game.js';
 import { PETS, MOUNT_SCALE } from './data.js';
 import * as M from './models.js';
 import { makeWing } from './bigModels.js';
@@ -86,7 +86,7 @@ export class Pet {
     }
   }
 
-  get healRate() { return this.def.heal + this.upg.mending; }
+  get healRate() { return (this.def.heal + this.upg.mending) * diff().petHeal; }
   recalc() {
     const old = this.maxHp;
     this.maxHp = this.def.hp + this.upg.vitality * 40 + (this.winged ? WING_HP : 0);
@@ -97,6 +97,7 @@ export class Pet {
   takeHit(dmg) {
     if (!this.alive || G.state !== 'playing') return;
     if (G.won) return;
+    if (inShelter(this.pos)) return; // safe behind the shelter's barrier
     if (this.mounted) dmg *= 0.7; // hard to hit while it flies
     dmg = Math.max(1, Math.round(dmg));
     this.hp -= dmg;
@@ -175,7 +176,13 @@ export class Pet {
       // back off out of ground-slam range of heavy monsters
       if (nearest.def.slam) keep = Math.max(keep, nearest.def.slam + 2.5 - nd);
     }
-    const gx = p.pos.x + Math.sin(ang) * keep, gz = p.pos.z + Math.cos(ang) * keep;
+    let gx = p.pos.x + Math.sin(ang) * keep, gz = p.pos.z + Math.cos(ang) * keep;
+    // when you hide in the shelter, your pet comes inside too
+    const S = world.shelter;
+    if (S && S.active && inShelter(p.pos) && !inShelter({ x: gx, z: gz }, -1.5)) {
+      gx = (p.pos.x + S.x) / 2;
+      gz = (p.pos.z + S.z) / 2;
+    }
     const dx = gx - this.pos.x, dz = gz - this.pos.z;
     const d = Math.hypot(dx, dz);
     if (d > 45) {
@@ -212,6 +219,7 @@ export class Pet {
     } else if (this.hp < this.maxHp && this.lastHurt > 4) {
       this.heal(this.healRate * 0.6 * dt);
     }
+    if (this.hp < this.maxHp && inShelter(this.pos)) this.heal((4 + this.maxHp * 0.02) * dt);
 
     // Animation
     this.phase += dt * (moving ? 14 : 3);

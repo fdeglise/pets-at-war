@@ -1,6 +1,6 @@
 // Coins, dropped items and treasure chests.
 import * as THREE from 'three';
-import { G } from './game.js';
+import { G, diff } from './game.js';
 import { RARITY, itemRarity, itemName, rollItem, MAX_WEAPONS, MAX_ARMORS, ARMORS } from './data.js';
 import * as M from './models.js';
 import { FX } from './effects.js';
@@ -71,7 +71,7 @@ export function pickUp(d) {
   const item = d.item;
   if (item.type === 'weapon') {
     if (p.weapons.length >= MAX_WEAPONS) {
-      UI.notify('Weapon slots are full. Sell something at the shop (B).', '#ffb3b3');
+      UI.notify(`Weapon slots are full. Open your backpack (${UI.keyLabel('KeyI')}) to sell or clear it.`, '#ffb3b3');
       Audio.play('error');
       return false;
     }
@@ -79,7 +79,7 @@ export function pickUp(d) {
     UI.refreshHotbar();
   } else {
     if (p.armors.length >= MAX_ARMORS) {
-      UI.notify('Armor rack is full. Sell something at the shop (B).', '#ffb3b3');
+      UI.notify(`Armor rack is full. Open your backpack (${UI.keyLabel('KeyI')}) to sell or clear it.`, '#ffb3b3');
       Audio.play('error');
       return false;
     }
@@ -117,7 +117,7 @@ export function openChest(c) {
   p.x += Math.sin(c.root.rotation.y) * 1.8;
   p.z += Math.cos(c.root.rotation.y) * 1.8;
   spawnDrop(p, rollItem(wave, 0.6));
-  spawnCoins(c.pos, 15 + wave * 6);
+  spawnCoins(c.pos, Math.round((15 + wave * 6) * diff().coins));
   FX.burst(tmp.set(c.pos.x, c.pos.y + 1, c.pos.z), { count: 30, color: 0xffd24a, glow: true, speed: 6, up: 4, size: 0.2, life: 1 });
 }
 

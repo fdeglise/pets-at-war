@@ -1,6 +1,6 @@
 // Monsters: AI, animation, death, taming. Tamed monsters become allies that hunt.
 import * as THREE from 'three';
-import { G, enemies, allies } from './game.js';
+import { G, enemies, allies, diff } from './game.js';
 import { MONSTERS, MAX_ALLIES, rollItem } from './data.js';
 import * as M from './models.js';
 import { FX } from './effects.js';
@@ -63,8 +63,10 @@ export class Monster {
 
   applyLevel(l) {
     const k = this.def.fixedLevel ? 0 : Math.max(0, l - 1);
-    this.maxHp = Math.round(this.def.hp * (1 + 0.16 * k));
-    this.dmg = this.def.dmg * (1 + 0.09 * k);
+    // the difficulty only scales your foes; tamed allies keep their full strength
+    const D = this.ally ? { enemyHp: 1, enemyDmg: 1 } : diff();
+    this.maxHp = Math.round(this.def.hp * (1 + 0.16 * k) * D.enemyHp);
+    this.dmg = this.def.dmg * (1 + 0.09 * k) * D.enemyDmg;
     this.level = l;
   }
 
@@ -186,6 +188,8 @@ export class Monster {
     this.knock.multiplyScalar(Math.exp(-dt * 7));
     world.collide(this.pos, this.radius * 0.8);
     if (!world.walkable(this.pos.x, this.pos.z)) { this.pos.x = ox; this.pos.z = oz; }
+    // the Easy-mode shelter's barrier keeps every enemy out
+    if (!this.ally && world.shelter) world.shelter.repel(this);
     this.pos.y = world.getHeight(this.pos.x, this.pos.z);
     const moved = Math.hypot(this.pos.x - ox, this.pos.z - oz) / Math.max(dt, 1e-4);
     this.moveAmt += (Math.min(1, moved / Math.max(1, def.speed)) - this.moveAmt) * Math.min(1, dt * 10);
@@ -448,7 +452,7 @@ export function killMonster(m) {
   G.stats.kills++;
   G.onKill && G.onKill(m);
   const wave = Math.max(1, Waves.n, m.level);
-  const coins = Math.round(m.def.coins * (1 + 0.1 * (wave - 1)));
+  const coins = Math.round(m.def.coins * (1 + 0.1 * (wave - 1)) * diff().coins);
   spawnCoins(m.pos, coins);
   const dropChance = m.def.boss ? 1 : m.type === 'golem' ? 0.22 : 0.075;
   if (Math.random() < dropChance) spawnDrop(m.pos.clone(), rollItem(wave, m.def.boss ? 1 : m.type === 'golem' ? 0.3 : 0));
@@ -459,6 +463,9 @@ export function killMonster(m) {
   }
 }
 
+// Chance that pressing E tames this monster (the difficulty nudges it up or down).
+export const tameChance = (m) => Math.min(0.95, Math.max(0.05, m.def.tame + diff().tame));
+
 export function tryTame(m) {
   if (allies().length >= MAX_ALLIES) {
     UI.notify(`You can only have ${MAX_ALLIES} tamed allies`, '#ffb3b3');
@@ -466,14 +473,13 @@ export function tryTame(m) {
     return;
   }
   m.tameable = false;
-  if (Math.random() < m.def.tame) {
+  if (Math.random() < tameChance(m)) {
     m.ally = true;
     m.wave = false;
-    m.hp = Math.round(m.maxHp * 0.75);
     m.status.burn = m.status.poison = m.status.slow = 0;
     m.target = null;
     m.applyLevel(Math.max(m.level, Waves.n));
-    m.hp = Math.min(m.hp, m.maxHp);
+    m.hp = Math.round(m.maxHp * 0.75);
     const ring = new THREE.Mesh(
       M.cached('allyRingGeo', () => new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2)),
       M.cached('allyRingMat', () => {

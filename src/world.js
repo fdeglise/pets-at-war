@@ -2,9 +2,10 @@
 // Terrain, water, lava, sky, vegetation, plaza, merchant, Elder, and travel portals.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { makeNoise, smoothstep, lerp, mulberry32 } from './util.js';
+import { makeNoise, smoothstep, lerp, mulberry32, angleDiff } from './util.js';
 import { makeAvatar, std, rbox, mesh, group, glowMat } from './models.js';
 import { makeElder } from './bigModels.js';
+import { buildDecor } from './decor.js';
 
 export const CELL = 2;
 export const HALF = 340; // the map covers [-HALF, HALF] on both axes
@@ -36,11 +37,12 @@ export function nearestIsland(x, z) {
 }
 
 // Per-location sky, fog and light moods (blended when you travel).
+// cloud/cover: colour and amount of the painted clouds; mtn: tint of the far mountain ranges.
 const ATMOS = {
-  meadow:  { fog: 0xcde8ff, top: 0x2b78e4, horizon: 0xcde8ff, bottom: 0x8fc4ea, near: 150, far: 620, sun: 0xfff0d6, sunI: 2.7, hemiSky: 0xd2ebff, hemiGround: 0x5d7a3e, hemiI: 0.75 },
-  snow:    { fog: 0xc3d6ec, top: 0x3f78cc, horizon: 0xd4e4f4, bottom: 0x9cbce0, near: 150, far: 580, sun: 0xf4f0ff, sunI: 2.25, hemiSky: 0xd8e8ff, hemiGround: 0x6a82a0, hemiI: 0.6 },
-  volcano: { fog: 0xd8a07c, top: 0x5d5a8f, horizon: 0xf0b78a, bottom: 0xa06a58, near: 90, far: 470, sun: 0xffcf9a, sunI: 2.6, hemiSky: 0xffd2b0, hemiGround: 0x5a3a2e, hemiI: 0.7 },
-  roost:   { fog: 0xb98a8e, top: 0x352a5e, horizon: 0xd88b6c, bottom: 0x8a5a5a, near: 80, far: 450, sun: 0xffb27a, sunI: 2.5, hemiSky: 0xffc2a8, hemiGround: 0x4a2a2a, hemiI: 0.7 },
+  meadow:  { fog: 0xcde8ff, top: 0x2b78e4, horizon: 0xcde8ff, bottom: 0x8fc4ea, near: 150, far: 620, sun: 0xfff0d6, sunI: 2.7, hemiSky: 0xd2ebff, hemiGround: 0x5d7a3e, hemiI: 0.75, cloud: 0xffffff, cover: 0.42, mtn: 0x5f86b8 },
+  snow:    { fog: 0xc3d6ec, top: 0x3f78cc, horizon: 0xd4e4f4, bottom: 0x9cbce0, near: 150, far: 580, sun: 0xf4f0ff, sunI: 2.25, hemiSky: 0xd8e8ff, hemiGround: 0x6a82a0, hemiI: 0.6, cloud: 0xf2f6ff, cover: 0.55, mtn: 0x7f9cc4 },
+  volcano: { fog: 0xd8a07c, top: 0x5d5a8f, horizon: 0xf0b78a, bottom: 0xa06a58, near: 90, far: 470, sun: 0xffcf9a, sunI: 2.6, hemiSky: 0xffd2b0, hemiGround: 0x5a3a2e, hemiI: 0.7, cloud: 0xa89490, cover: 0.55, mtn: 0x6a4650 },
+  roost:   { fog: 0xb98a8e, top: 0x352a5e, horizon: 0xd88b6c, bottom: 0x8a5a5a, near: 80, far: 450, sun: 0xffb27a, sunI: 2.5, hemiSky: 0xffc2a8, hemiGround: 0x4a2a2a, hemiI: 0.7, cloud: 0xd89a8a, cover: 0.48, mtn: 0x4a2e4c },
 };
 
 export function buildWorld(scene) {
@@ -178,12 +180,37 @@ export function buildWorld(scene) {
   }
   portals.forEach((p, i) => { p.id = i; p.colors = PORTAL_COLORS[p.dest]; });
 
+  // The Easy-mode shelter stands in a flat clearing on Haven, between the Roost and Frostpeak paths.
+  // (The clearing exists on every difficulty; the shelter itself only appears on Easy.)
+  const shelterSpot = (() => {
+    let best = null, bs = 1e9;
+    for (let a = 2.2; a <= 3.4; a += 0.04) {
+      for (let r = 27; r <= 44; r += 1.5) {
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (pathDist(x, z) < 14) continue;
+        const h = havenH(x, z);
+        if (h < 2.0 || h > 7) continue;
+        let sc = r * 0.05;
+        for (let k = 0; k < 12; k++) {
+          const q = (k / 12) * Math.PI * 2;
+          sc += Math.abs(havenH(x + Math.cos(q) * 10, z + Math.sin(q) * 10) - h);
+        }
+        if (sc < bs) { bs = sc; best = { x, z, a, y: h }; }
+      }
+    }
+    return best || { x: -30, z: 14, a: Math.atan2(14, -30), y: Math.max(2.2, havenH(-30, 14)) };
+  })();
+
   function height(I, x, z) {
     let h = rawFns[I.id](x, z);
     for (const p of portals) {
       if (p.island !== I.id) continue;
       const d = Math.hypot(x - p.x, z - p.z);
       if (d < 11) h = lerp(p.y, h, smoothstep(5, 11, d));
+    }
+    if (I.id === 'haven') {
+      const sd = Math.hypot(x - shelterSpot.x, z - shelterSpot.z);
+      if (sd < 21) h = lerp(shelterSpot.y, h, smoothstep(10.5, 21, sd));
     }
     return h;
   }
@@ -209,11 +236,23 @@ export function buildWorld(scene) {
     return h00 + (h11 - h01) * fx + (h01 - h00) * fz;
   }
   // Triangle-exact height of the rendered terrain.
-  function getHeight(x, z) {
+  function terrainHeight(x, z) {
     let best = SEA_FLOOR;
     for (const P of patches) {
       const h = patchHeight(P, x, z);
       if (h !== null && h > best) best = h;
+    }
+    return best;
+  }
+  // Walkable ground: the terrain plus wooden decks (the pier).
+  const decks = [];
+  function getHeight(x, z) {
+    let best = terrainHeight(x, z);
+    for (const d of decks) {
+      if (d.y <= best) continue;
+      const al = x * d.ca + z * d.sa - d.r0;
+      if (al < 0 || al > d.len) continue;
+      if (Math.abs(-x * d.sa + z * d.ca) <= d.w / 2) best = d.y;
     }
     return best;
   }
@@ -367,26 +406,75 @@ export function buildWorld(scene) {
   tgeo.setAttribute('color', new THREE.Float32BufferAttribute(colArr, 3));
   tgeo.computeVertexNormals();
   const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0 });
-  // Fine world-space grain so big flat faces don't look like plastic.
+  // Fine world-space grain so big flat faces don't look like plastic, rock strata on cliffs,
+  // cobbled rings on Haven's plaza and the Frostpeak arena, and caustics on the sea floor.
+  const terrainU = { uTime: { value: 0 }, uArena: { value: new THREE.Vector3(FROST.cx, ARENA_H, FROST.cz) } };
   terrainMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = terrainU.uTime;
+    sh.uniforms.uArena = terrainU.uArena;
     sh.vertexShader = 'varying vec3 vWPos;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    sh.fragmentShader = 'varying vec3 vWPos;\n' + GLSL_NOISE + sh.fragmentShader.replace(
+    sh.fragmentShader = 'varying vec3 vWPos;\nuniform float uTime;\nuniform vec3 uArena;\n' + GLSL_NOISE + GLSL_COBBLE + sh.fragmentShader.replace(
       '#include <color_fragment>',
       `#include <color_fragment>
        float gr = vnoise(vWPos.xz * 1.7) * 0.6 + vnoise(vWPos.xz * 0.35 + 7.0) * 0.4;
-       diffuseColor.rgb *= 0.9 + gr * 0.18;`
+       diffuseColor.rgb *= 0.9 + gr * 0.18;
+       vec3 fN = normalize(cross(dFdx(vWPos), dFdy(vWPos)));
+       float steep = 1.0 - smoothstep(0.5, 0.82, abs(fN.y));
+       float strata = sin(vWPos.y * 2.4 + vnoise(vWPos.xz * 0.12) * 5.0);
+       diffuseColor.rgb *= 1.0 - steep * 0.16 * smoothstep(0.2, 0.8, strata);
+       diffuseColor.rgb *= 1.0 + steep * 0.1 * smoothstep(0.85, 1.0, strata);
+       if (length(vWPos.xz) < 16.3 && abs(vWPos.y - 2.0) < 0.03) {
+         diffuseColor.rgb = cobble(vWPos.xz, vec3(0.64, 0.54, 0.40), vec3(0.45, 0.37, 0.27), vec3(0.11, 0.34, 0.27), vec3(0.71, 0.45, 0.12)) * (0.94 + gr * 0.1);
+       }
+       vec2 ap = vWPos.xz - uArena.xz;
+       if (length(ap) < 15.8 && abs(vWPos.y - uArena.y) < 0.03) {
+         diffuseColor.rgb = cobble(ap, vec3(0.62, 0.78, 0.92), vec3(0.47, 0.65, 0.85), vec3(0.25, 0.58, 0.95), vec3(0.85, 0.95, 1.0)) * (0.95 + gr * 0.08);
+       }
+       float uw = 1.0 - smoothstep(-1.0, -0.05, vWPos.y);
+       if (uw > 0.0) {
+         vec2 cp = vWPos.xz * 0.42;
+         float c1 = vnoise(cp + vec2(uTime * 0.31, uTime * 0.17));
+         float c2 = vnoise(cp * 1.37 + vec2(-uTime * 0.23, uTime * 0.29) + 5.3);
+         float ca = pow(1.0 - abs(c1 - c2), 10.0);
+         float fade = 1.0 - (1.0 - smoothstep(-5.5, -0.5, vWPos.y)) * 0.75;
+         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.55, 0.82, 0.92), uw);
+         diffuseColor.rgb += vec3(0.30, 0.48, 0.52) * ca * uw * fade;
+       }`
     );
   };
   const terrain = new THREE.Mesh(tgeo, terrainMat);
   terrain.receiveShadow = true;
   scene.add(terrain);
 
+  // A wooden pier on Haven's shore, away from the portal paths. It is walkable (see decks).
+  const pier = (() => {
+    let best = null, bs = 1e9;
+    for (let a = -Math.PI; a < Math.PI; a += 0.03) {
+      if (portals.some((p) => p.island === 'haven' && Math.abs(angleDiff(a, p.a)) < 0.55)) continue;
+      if (Math.abs(angleDiff(a, shelterSpot.a)) < 0.45) continue;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      let rS = 0;
+      for (let r = 50; r < 150; r += 0.5) if (terrainHeight(ca * r, sa * r) < 0.2) { rS = r; break; }
+      if (!rS) continue;
+      let r0 = rS;
+      while (r0 > rS - 12 && terrainHeight(ca * r0, sa * r0) < 1.3) r0 -= 0.5;
+      if (rS - r0 > 9 || terrainHeight(ca * (rS + 13), sa * (rS + 13)) > -2.2) continue;
+      let side = 0;
+      for (const ac of [-1.6, 1.6]) side += Math.abs(terrainHeight(ca * r0 - sa * ac, sa * r0 + ca * ac) - 1.3);
+      if (side > 1.2) continue;
+      const sc = Math.abs(angleDiff(a, 0.45)) * 2 + (rS - r0) * 0.2 + side;
+      if (sc < bs) { bs = sc; best = { a, r0: r0 - 0.6, len: rS - r0 + 13.5, y: 1.3, w: 2.6 }; }
+    }
+    if (best) decks.push({ ca: Math.cos(best.a), sa: Math.sin(best.a), r0: best.r0, len: best.len, w: best.w, y: best.y });
+    return best;
+  })();
+
   // Height texture for the water shader (depth tint + shore foam).
   const htex = (() => {
     const data = new Uint8Array(MAP_PX * MAP_PX * 4);
     for (let j = 0; j < MAP_PX; j++) {
       for (let i = 0; i < MAP_PX; i++) {
-        const h = getHeight(-HALF + (i + 0.5) * CELL, -HALF + (j + 0.5) * CELL);
+        const h = terrainHeight(-HALF + (i + 0.5) * CELL, -HALF + (j + 0.5) * CELL);
         const v = Math.round(THREE.MathUtils.clamp((h + 8) / 48, 0, 1) * 255);
         const o = (j * MAP_PX + i) * 4;
         data[o] = v; data[o + 1] = v; data[o + 2] = v; data[o + 3] = 255;
@@ -413,6 +501,7 @@ export function buildWorld(scene) {
       uShallow: { value: new THREE.Color(0x3fd6cf) },
       uDeep: { value: new THREE.Color(0x0a4f9e) },
       uSky: { value: new THREE.Color(0xcde8ff) },
+      uTop: { value: new THREE.Color(0x2b78e4) },
       uFoam: { value: new THREE.Color(0xf4fbff) },
     }]),
     vertexShader: `uniform float uTime; varying vec3 vWorld; varying vec3 vN;
@@ -431,7 +520,7 @@ export function buildWorld(scene) {
         #include <fog_vertex>
       }`,
     fragmentShader: `uniform float uTime; uniform sampler2D uHeight; uniform vec3 uRect; uniform vec3 uSunDir;
-      uniform vec3 uShallow; uniform vec3 uDeep; uniform vec3 uSky; uniform vec3 uFoam;
+      uniform vec3 uShallow; uniform vec3 uDeep; uniform vec3 uSky; uniform vec3 uTop; uniform vec3 uFoam;
       varying vec3 vWorld; varying vec3 vN;
       #include <fog_pars_fragment>
       ${GLSL_NOISE}
@@ -447,7 +536,9 @@ export function buildWorld(scene) {
         float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
         float dk = smoothstep(0.0, 7.0, depth);
         vec3 col = mix(uShallow, uDeep, dk);
-        col = mix(col, uSky, fres * 0.6);
+        vec3 Rv = reflect(-V, N);
+        vec3 skyR = mix(uSky, uTop, pow(clamp(Rv.y, 0.0, 1.0), 0.6));
+        col = mix(col, skyR, fres * 0.65);
         vec3 H = normalize(uSunDir + V);
         col += vec3(1.0, 0.95, 0.85) * pow(max(dot(N, H), 0.0), 260.0) * 3.5;
         float band = 1.0 - smoothstep(0.0, 0.9, depth);
@@ -516,16 +607,44 @@ export function buildWorld(scene) {
       horizon: { value: new THREE.Color(0xcde8ff) },
       bottom: { value: new THREE.Color(0x8fc4ea) },
       sunDir: { value: sunDir },
+      uTime: { value: 0 },
+      uCloud: { value: new THREE.Color(ATMOS.meadow.cloud) },
+      uCover: { value: ATMOS.meadow.cover },
+      uMtn: { value: new THREE.Color(ATMOS.meadow.mtn) },
     },
     vertexShader: `varying vec3 vDir;
       void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sunDir; varying vec3 vDir;
+    fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sunDir;
+      uniform float uTime; uniform vec3 uCloud; uniform float uCover; uniform vec3 uMtn;
+      varying vec3 vDir;
+      ${GLSL_NOISE}
+      float fbm5(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++){ s += a * vnoise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return s / 0.97; }
+      float ridge(float az, float k, float o){ return fbm5(vec2(cos(az), sin(az)) * k + o); }
       void main(){
         vec3 d = normalize(vDir);
         float h = d.y;
         vec3 col = h > 0.0 ? mix(horizon, top, pow(clamp(h, 0.0, 1.0), 0.55)) : mix(horizon, bottom, pow(clamp(-h, 0.0, 1.0), 0.4));
         float s = max(dot(d, sunDir), 0.0);
-        col += vec3(1.0, 0.9, 0.7) * pow(s, 900.0) * 6.0 + vec3(1.0, 0.85, 0.6) * pow(s, 10.0) * 0.28;
+        col += vec3(1.0, 0.85, 0.6) * (pow(s, 10.0) * 0.3 + pow(s, 80.0) * 0.35);
+        // painted clouds drifting on a high plane, lit from the sun's side
+        if (h > 0.0) {
+          vec2 cp = d.xz / (h + 0.1) * 0.9 + vec2(uTime * 0.008, uTime * 0.003);
+          float n = fbm5(cp);
+          float cover = smoothstep(1.0 - uCover, 1.0 - uCover + 0.22, n);
+          float lit = clamp(0.55 + (n - fbm5(cp + sunDir.xz * 0.06)) * 6.0, 0.0, 1.0);
+          vec3 cc = uCloud * mix(0.74, 1.08, lit) + vec3(1.0, 0.88, 0.7) * pow(s, 8.0) * 0.6;
+          col = mix(col, cc, cover * smoothstep(0.0, 0.14, h) * 0.9);
+        }
+        // two hazy mountain ranges far beyond the sea
+        float az = atan(d.z, d.x);
+        float m1 = pow(max(ridge(az, 1.6, 3.0) - 0.4, 0.0) * 2.4, 1.5) * 0.09;
+        float m2 = pow(max(ridge(az, 3.1, 17.0) - 0.47, 0.0) * 2.6, 1.3) * 0.05;
+        float k1 = (1.0 - smoothstep(m1 - 0.0015, m1 + 0.0015, h)) * smoothstep(0.0, 0.004, m1);
+        float k2 = (1.0 - smoothstep(m2 - 0.0015, m2 + 0.0015, h)) * smoothstep(0.0, 0.004, m2);
+        col = mix(col, mix(uMtn, horizon, 0.58) * (0.96 + 0.08 * clamp(h / max(m1, 0.001), 0.0, 1.0)), k1);
+        col = mix(col, mix(uMtn, horizon, 0.3) * (0.94 + 0.1 * clamp(h / max(m2, 0.001), 0.0, 1.0)), k2);
+        col = mix(col, horizon, (1.0 - smoothstep(-0.01, 0.025, h)) * 0.7);
+        col += vec3(1.0, 0.92, 0.75) * pow(s, 900.0) * 6.0 * (1.0 - max(k1, k2));
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -533,6 +652,7 @@ export function buildWorld(scene) {
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(1000, 32, 16), skyMat);
   sky.frustumCulled = false;
+  sky.renderOrder = 10; // drawn after the opaque scene so hidden sky pixels skip the shader
   scene.add(sky);
   scene.fog = new THREE.Fog(0xcde8ff, 150, 620);
 
@@ -585,6 +705,9 @@ export function buildWorld(scene) {
   }
 
   const placed = [];
+  // Spots kept free of grass, flowers and small rocks (houses, the shelter, the pier's foot).
+  const clearZones = [];
+  const inClear = (x, z, pad = 0) => clearZones.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < (c.r + pad) ** 2);
   function farFromPlaced(x, z, r) {
     for (const p of placed) if ((p.x - x) ** 2 + (p.z - z) ** 2 < (p.r + r) ** 2) return false;
     return true;
@@ -598,6 +721,7 @@ export function buildWorld(scene) {
     if (slope > maxSlope) return false;
     for (const p of portals) if (Math.hypot(x - p.x, z - p.z) < 10) return false;
     if (I.id === 'haven' && pathDist(x, z) < 3.2) return false;
+    if (I.id === 'haven' && inClear(x, z, 0.5)) return false;
     if (I.id === 'frost' && Math.hypot(x - lake.x, z - lake.z) < lake.r + 2) return false;
     if (I.id === 'ember' && inLava(x, z, 3)) return false;
     return true;
@@ -606,6 +730,12 @@ export function buildWorld(scene) {
     const ang = R(0, Math.PI * 2), dist = Math.sqrt(R((minD / maxD) ** 2, 1)) * maxD;
     return [I.cx + Math.cos(ang) * dist, I.cz + Math.sin(ang) * dist];
   };
+
+  // ---------- Haven's village, wildlife and the Easy-mode shelter ----------
+  const decor = buildDecor({
+    scene, R, getHeight, okSpot, farFromPlaced, placed, addCol, pathDist, portals, clearZones,
+    HAVEN: ISLANDS.haven, PLAZA_R, shelterSpot, pier,
+  });
 
   // ---------- trees ----------
   const ng = (g) => (g.index ? g.toNonIndexed() : g);
@@ -700,7 +830,7 @@ export function buildWorld(scene) {
       const big = got < want * 0.3;
       const s = big ? R(1.1, 2.4) : R(0.25, 0.6);
       if (big && (!okSpot(I, x, z, 22, I.r - 4) || !farFromPlaced(x, z, s * 1.2))) continue;
-      if (I.id === 'haven' && Math.hypot(x, z) < PLAZA_R + 3) continue;
+      if (I.id === 'haven' && (Math.hypot(x, z) < PLAZA_R + 3 || inClear(x, z, 0.6))) continue;
       if (big) { placed.push({ x, z, r: s * 1.2 }); addCol(x, z, s * 0.95); }
       dummy.position.set(x, h + (big ? s * 0.2 : 0), z);
       dummy.rotation.set(R(0, 3), R(0, 3), R(0, 3));
@@ -851,7 +981,7 @@ export function buildWorld(scene) {
     if (d < PLAZA_R + 2 || d > 110) continue;
     const h = getHeight(x, z);
     if (h < 1.0) continue;
-    if (pathDist(x, z) < 2.2) continue;
+    if (pathDist(x, z) < 2.2 || inClear(x, z, 0.3)) continue;
     const slope = Math.abs(getHeight(x + 1, z) - h) + Math.abs(getHeight(x, z + 1) - h);
     if (slope > 0.9) continue;
     dummy.position.set(x, h - 0.05, z);
@@ -879,7 +1009,7 @@ export function buildWorld(scene) {
     for (let q = 0; q < 8 && fn < FL; q++) {
       const x = cx + R(-2.5, 2.5), z = cz + R(-2.5, 2.5);
       const h = getHeight(x, z);
-      if (h < 1.1 || Math.hypot(x, z) < PLAZA_R + 2 || pathDist(x, z) < 2.2) continue;
+      if (h < 1.1 || Math.hypot(x, z) < PLAZA_R + 2 || pathDist(x, z) < 2.2 || inClear(x, z, 0.3)) continue;
       dummy.position.set(x, h + 0.28, z);
       dummy.rotation.set(0, R(0, 3), 0);
       dummy.scale.set(1, 0.55, 1);
@@ -1092,12 +1222,21 @@ export function buildWorld(scene) {
     p.mat.uniforms.uSeal.value = sealed ? 1 : 0;
   }
 
-  // ---------- minimap base: trees ----------
+  // ---------- minimap base: trees and the pier ----------
   mctx.fillStyle = 'rgba(30,70,40,0.6)';
   for (const t of treePts) {
     mctx.beginPath();
     mctx.arc((t.x + HALF) / CELL, (t.z + HALF) / CELL, 1.1, 0, Math.PI * 2);
     mctx.fill();
+  }
+  if (pier) {
+    mctx.strokeStyle = '#8a5a33';
+    mctx.lineWidth = 1.3;
+    mctx.beginPath();
+    const ca = Math.cos(pier.a), sa = Math.sin(pier.a);
+    mctx.moveTo((ca * pier.r0 + HALF) / CELL, (sa * pier.r0 + HALF) / CELL);
+    mctx.lineTo((ca * (pier.r0 + pier.len) + HALF) / CELL, (sa * (pier.r0 + pier.len) + HALF) / CELL);
+    mctx.stroke();
   }
 
   // ---------- collision + bounds ----------
@@ -1141,6 +1280,9 @@ export function buildWorld(scene) {
     atmos.hemiSky.lerp(tgt.set(A.hemiSky), k);
     atmos.hemiGround.lerp(tgt.set(A.hemiGround), k);
     atmos.hemiI = lerp(atmos.hemiI, A.hemiI, k);
+    skyMat.uniforms.uCloud.value.lerp(tgt.set(A.cloud), k);
+    skyMat.uniforms.uMtn.value.lerp(tgt.set(A.mtn), k);
+    skyMat.uniforms.uCover.value = lerp(skyMat.uniforms.uCover.value, A.cover, k);
     scene.fog.color.copy(atmos.fog);
     scene.fog.near = atmos.near;
     scene.fog.far = atmos.far;
@@ -1150,11 +1292,14 @@ export function buildWorld(scene) {
     hemi.groundColor.copy(atmos.hemiGround);
     hemi.intensity = atmos.hemiI;
     waterMat.uniforms.uSky.value.copy(skyMat.uniforms.horizon.value);
+    waterMat.uniforms.uTop.value.copy(skyMat.uniforms.top.value);
   }
 
   // ---------- per-frame ----------
   function update(dt, t, camera, focus, biome) {
     portalU.uTime.value = t;
+    skyMat.uniforms.uTime.value = t;
+    terrainU.uTime.value = t;
     waterMat.uniforms.uTime.value = t;
     lavaMat.uniforms.uTime.value = t;
     grassU.uTime.value = t;
@@ -1174,6 +1319,7 @@ export function buildWorld(scene) {
     const f = 0.9 + Math.sin(t * 7.3) * 0.05 + Math.sin(t * 13.1) * 0.04;
     lanternMat.color.setRGB(2.6 * f, 1.4 * f, 0.4 * f);
     elder.orb.material.color.setRGB(0.6, 2.4 + Math.sin(t * 2.5) * 0.5, 1.4);
+    decor.update(dt, t, camera, focus);
     blendAtmos(biome || 'meadow', Math.min(1, dt * 1.4));
     // shadow frustum follows the focus point (snapped to texels to avoid shimmering)
     const texel = 110 / 2048;
@@ -1217,9 +1363,34 @@ export function buildWorld(scene) {
     getHeight, collide, walkable, inLava, update, portals, colliders, merchantPos, elderPos, elder, mapCanvas, makeEnvironment,
     sun, hemi, plazaRadius: PLAZA_R, setPortalSealed, randomLandPoint, featherSpots,
     arena, nest, crater, lavaPools,
+    shelter: decor.shelter, pier, windmill: decor.windmill,
+    // chimneys and the volcano puff smoke (main.js emits the particles)
+    smoke: [...decor.smoke, { pos: new THREE.Vector3(crater.x, crater.y + 2.5, crater.z), big: true }],
     spawnPoint: new THREE.Vector3(0, 2, 7),
   };
 }
+
+// Rings of cobblestones around a centre (needs GLSL_NOISE). Colours are linear.
+const GLSL_COBBLE = `
+  vec3 cobble(vec2 p, vec3 c1, vec3 c2, vec3 ia, vec3 ib){
+    float ringW = 1.05;
+    float pr = length(p);
+    float ri = floor(pr / ringW);
+    float fr = fract(pr / ringW);
+    float circ = 6.2831853 * max(ri + 0.5, 0.5) * ringW;
+    float nseg = max(5.0, floor(circ / 1.3));
+    float sa = (atan(p.y, p.x) / 6.2831853 + 0.5) * nseg + hash12(vec2(ri, 3.7)) * 7.0;
+    float si = floor(sa);
+    float sf = fract(sa);
+    float id = hash12(vec2(ri * 1.37, mod(si, nseg)));
+    vec3 col = mix(c1, c2, id);
+    if (abs(ri - 4.0) < 0.5 || abs(ri - 11.0) < 0.5) col = mix(ia, ib, mod(si, 2.0));
+    if (ri < 1.0) col = ib;
+    float e = min(min(fr, 1.0 - fr) * ringW, min(sf, 1.0 - sf) * circ / nseg);
+    col *= 0.86 + 0.14 * smoothstep(0.1, 0.25, e);
+    return mix(vec3(0.1, 0.09, 0.08), col, smoothstep(0.035, 0.1, e));
+  }
+`;
 
 // Shared GLSL value noise.
 export const GLSL_NOISE = `

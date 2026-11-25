@@ -1,7 +1,7 @@
 // The player avatar: movement, sword swings, bow shots, getting knocked down.
 import * as THREE from 'three';
-import { G, enemies } from './game.js';
-import { WEAPONS, ARMORS, ELEMENTS, REVIVE_COST, FLY_SPEED, FLY_CLIMB, FLY_CEILING, makeItem } from './data.js';
+import { G, enemies, diff, inShelter } from './game.js';
+import { WEAPONS, ARMORS, ELEMENTS, FLY_SPEED, FLY_CLIMB, FLY_CEILING, SHELTER_HEAL, makeItem } from './data.js';
 import * as M from './models.js';
 import { FX } from './effects.js';
 import { Audio } from './audio.js';
@@ -138,6 +138,7 @@ export class Player {
   takeHit(dmg) {
     if (this.downed > 0 || this.invuln > 0 || G.state !== 'playing') return;
     if (G.won) return;
+    if (inShelter(this.pos)) return; // nothing gets through the shelter's barrier
     const a = this.armorDef();
     dmg *= 1 - (a ? a.def : 0);
     if (this.mounted) dmg *= 0.85; // your pet's wings shield you a little
@@ -157,7 +158,7 @@ export class Player {
     this.downed = 2.4;
     this.swingT = 0;
     const pet = G.pet;
-    const cost = Math.round(pet.maxHp * REVIVE_COST);
+    const cost = Math.round(pet.maxHp * diff().revive);
     Audio.play('down');
     if (pet.hp <= cost) {
       UI.banner(`${pet.name} gave everything`, 'There was not enough pet HP left to revive you.', '#ff6b8a');
@@ -269,6 +270,8 @@ export class Player {
       this.downed -= dt;
       this.vel.set(0, 0, 0);
       if (this.downed <= 0 && G.pet.alive) this.revive();
+    } else if (this.hp < this.maxHp && inShelter(this.pos)) {
+      this.heal(SHELTER_HEAL * dt);
     }
 
     // ---- movement ----

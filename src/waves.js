@@ -1,6 +1,6 @@
 // Wave director: slow start, growing waves, a boss every 5 waves, treasure chests.
 import * as THREE from 'three';
-import { G, enemies } from './game.js';
+import { G, enemies, diff } from './game.js';
 import { MONSTERS } from './data.js';
 import { weightedPick } from './util.js';
 import { spawnMonster, levelAllies } from './monsters.js';
@@ -8,8 +8,6 @@ import { spawnChest } from './loot.js';
 import { UI } from './ui.js';
 import { Audio } from './audio.js';
 import { FX } from './effects.js';
-
-const MAX_ALIVE = 26;
 
 export const Waves = {
   n: 0,
@@ -24,7 +22,7 @@ export const Waves = {
   reset() {
     this.n = 0;
     this.state = 'prep';
-    this.timer = 10;
+    this.timer = diff().firstPrep;
     this.queue = [];
     this.total = 0;
     this.chestT = 25;
@@ -34,7 +32,8 @@ export const Waves = {
     this.n = n;
     G.stats.wave = n;
     this.state = 'active';
-    const count = Math.round(3 + n * 2 + Math.pow(n, 1.3) * 0.35);
+    const D = diff();
+    const count = Math.max(2, Math.round((3 + n * 2 + Math.pow(n, 1.3) * 0.35) * D.waveSize));
     const list = [];
     for (let i = 0; i < count; i++) {
       const pool = Object.entries(MONSTERS)
@@ -45,7 +44,7 @@ export const Waves = {
     if (n % 5 === 0) list.splice(Math.min(3, list.length), 0, 'ogre');
     this.queue = list;
     this.total = list.length;
-    this.interval = Math.max(0.5, 3.2 - n * 0.2);
+    this.interval = Math.max(0.5, 3.2 - n * 0.2) * D.spawnGap;
     this.spawnT = 0.5;
     levelAllies(n);
     if (n % 5 === 0) {
@@ -69,7 +68,7 @@ export const Waves = {
       if (this.timer <= 0) this.start(this.n + 1);
     } else {
       this.spawnT -= dt;
-      if (this.spawnT <= 0 && this.queue.length && enemies().length < MAX_ALIVE) {
+      if (this.spawnT <= 0 && this.queue.length && enemies().length < diff().maxAlive) {
         const type = this.queue.shift();
         const gates = G.world.portals.filter((p) => p.island === 'haven');
         const portal = gates[Math.floor(Math.random() * gates.length)];
@@ -92,12 +91,12 @@ export const Waves = {
       }
       if (!this.queue.length && enemies().filter((m) => m.wave).length === 0) {
         this.state = 'prep';
-        this.timer = 12;
-        const bonus = 15 + this.n * 10;
+        this.timer = diff().prep;
+        const bonus = Math.round((15 + this.n * 10) * diff().coins);
         G.money += bonus;
         G.stats.earned += bonus;
         UI.moneyPop(bonus);
-        UI.banner(`WAVE ${this.n} CLEARED`, `+${bonus} coins · next wave in 12s · press B to shop`, '#5effa8');
+        UI.banner(`WAVE ${this.n} CLEARED`, `+${bonus} coins · next wave in ${this.timer}s · press B to shop`, '#5effa8');
         Audio.play('clear');
       }
     }

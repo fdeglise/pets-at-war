@@ -5,8 +5,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { G, enemies } from './game.js';
-import { MONSTERS, itemName, itemRarity, RARITY } from './data.js';
+import { G, enemies, diff, inShelter, recordKey } from './game.js';
+import { MONSTERS, DIFFICULTIES, itemName, itemRarity, RARITY } from './data.js';
 import { buildWorld, ISLANDS } from './world.js';
 import { FX } from './effects.js';
 import { UI } from './ui.js';
@@ -14,7 +14,7 @@ import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { Player } from './player.js';
 import { Pet } from './pet.js';
-import { updateMonsters, tryTame } from './monsters.js';
+import { updateMonsters, tryTame, tameChance } from './monsters.js';
 import { updateProjectiles } from './combat.js';
 import { updateLoot, pickUp, openChest, clearLoot } from './loot.js';
 import { Waves } from './waves.js';
@@ -61,6 +61,9 @@ const grade = new ShaderPass({
       float l = dot(col, vec3(0.299, 0.587, 0.114));
       col = mix(vec3(l), col, uSat);
       col = (col - 0.5) * uContrast + 0.5;
+      // split toning: cool shadows, warm highlights
+      float l2 = dot(col, vec3(0.299, 0.587, 0.114));
+      col *= mix(vec3(0.96, 0.99, 1.05), vec3(1.04, 1.0, 0.95), smoothstep(0.15, 0.75, l2));
       col *= uWarm;
       vec2 d = vUv - 0.5;
       col *= clamp(1.0 - dot(d, d) * uVig * 2.2, 0.0, 1.0);
@@ -101,6 +104,8 @@ scene.add(G.fireLight);
 G.playerIsland = 'haven';
 G.biome = 'meadow';
 try { G.quality = localStorage.getItem('paw-quality') || 'high'; } catch (e) { G.quality = 'high'; }
+try { const d = localStorage.getItem('paw-difficulty'); if (DIFFICULTIES[d]) G.difficulty = d; } catch (e) { /* optional */ }
+G.world.shelter.setActive(diff().shelter);
 
 UI.init(Shop, {
   start: startGame,
@@ -109,6 +114,12 @@ UI.init(Shop, {
   toggleQuality() {
     G.quality = G.quality === 'high' ? 'fast' : 'high';
     applyQuality();
+  },
+  setDifficulty(k) {
+    if (!DIFFICULTIES[k]) return;
+    G.difficulty = k;
+    G.world.shelter.setActive(diff().shelter);
+    try { localStorage.setItem('paw-difficulty', k); } catch (e) { /* optional */ }
   },
   closePanel,
   waves: () => Waves,
@@ -154,7 +165,10 @@ function cleanupRun() {
 function startGame() {
   Audio.init();
   cleanupRun();
-  G.money = 0;
+  const D = diff();
+  G.world.shelter.setActive(D.shelter);
+  G.money = D.startMoney;
+  G.inShelter = false;
   G.stats = { kills: 0, earned: 0, tamed: 0, wave: 0, bosses: 0, time: 0 };
   G.won = false;
   G.victoryT = -1;
@@ -171,6 +185,7 @@ function startGame() {
   G.dyingT = 0;
   UI.startHUD();
   UI.banner(`Protect ${G.pet.name}`, 'Your pet heals you; if it falls, you lose. Talk to the Elder by the shrine.', '#5effa8');
+  if (D.shelter) setTimeout(() => { if (G.state === 'playing') UI.notify('Easy mode: hide in the <b>shelter</b> (green dome on your map) to heal. Monsters can\'t get in.', '#5effd0'); }, 2500);
   Input.requestLock();
 }
 
@@ -228,8 +243,8 @@ function gameOver() {
   Input.exitLock();
   let best = G.stats.wave;
   try {
-    best = Math.max(best, +localStorage.getItem('paw-best-wave') || 0);
-    localStorage.setItem('paw-best-wave', String(best));
+    best = Math.max(best, +localStorage.getItem(recordKey('paw-best-wave')) || 0);
+    localStorage.setItem(recordKey('paw-best-wave'), String(best));
   } catch (e) { /* optional */ }
   UI.showGameOver(best);
 }
@@ -239,9 +254,9 @@ function victory() {
   Input.exitLock();
   let bestTime = G.stats.time;
   try {
-    const prev = +localStorage.getItem('paw-best-win') || 0;
+    const prev = +localStorage.getItem(recordKey('paw-best-win')) || 0;
     bestTime = prev ? Math.min(prev, G.stats.time) : G.stats.time;
-    localStorage.setItem('paw-best-win', String(Math.round(bestTime)));
+    localStorage.setItem(recordKey('paw-best-win'), String(Math.round(bestTime)));
   } catch (e) { /* optional */ }
   UI.showVictory(bestTime);
 }
@@ -293,7 +308,7 @@ function findInteraction() {
     for (const m of enemies()) {
       if (!m.tameable || m.hp / m.maxHp > 0.35) continue;
       const d = flat(m.pos) - m.radius;
-      consider(d * 0.8, 4.5, { kind: 'tame', obj: m, text: `${E} Tame <b>${m.def.name}</b> · ${Math.round(m.def.tame * 100)}% chance` });
+      consider(d * 0.8, 4.5, { kind: 'tame', obj: m, text: `${E} Tame <b>${m.def.name}</b> · ${Math.round(tameChance(m) * 100)}% chance` });
     }
   }
   const ep = G.world.elderPos;
@@ -377,11 +392,42 @@ function updateCamera(dt) {
   camera.lookAt(camTarget);
 }
 
-let menuT = 0;
+// Title screen: a slow, swooping flight around Haven Isle.
+let menuT = 0.6;
 function updateMenuCamera(dt) {
-  menuT += dt * 0.04;
-  camera.position.set(Math.cos(menuT) * 78, 34, Math.sin(menuT) * 78);
-  camera.lookAt(0, 4, 0);
+  menuT += dt * 0.035;
+  const r = 72 + Math.sin(menuT * 1.7) * 8;
+  camera.position.set(Math.cos(menuT) * r, 27 + Math.sin(menuT * 2.3) * 6, Math.sin(menuT) * r);
+  camera.lookAt(0, 5, 0);
+}
+
+// Chimney smoke and the volcano's plume.
+let smokeT = 0;
+function emitSmoke(dt) {
+  smokeT -= dt;
+  if (smokeT > 0) return;
+  smokeT = 0.12;
+  const cp = camera.position;
+  for (const s of G.world.smoke) {
+    const d2 = cp.distanceToSquared(s.pos);
+    if (s.big) {
+      if (d2 > 330 * 330) continue;
+      FX.burst(s.pos, { count: 2, color: Math.random() < 0.5 ? 0x3e3634 : 0x5e5654, speed: 0.8, up: 4.6, upBias: 0, size: 2.2, size1: 6.5, life: 8, gravity: -0.2, drag: 0.12, spread: 6 });
+      if (Math.random() < 0.6) FX.burst(s.pos, { count: 2, color: 0xff7a2a, glow: true, speed: 2, up: 7, size: 0.35, life: 2.2, gravity: 1.5, spread: 5 });
+    } else {
+      if (d2 > 140 * 140 || Math.random() < 0.55) continue;
+      FX.burst(s.pos, { count: 1, color: 0xd8d4cf, speed: 0.25, up: 1.1, upBias: 0, size: 0.35, size1: 1.1, life: 3.2, gravity: -0.05, drag: 0.4, spread: 0.2 });
+    }
+  }
+}
+
+// Tell the HUD when you step in or out of the shelter.
+function updateShelterState() {
+  const safe = inShelter(G.player.pos);
+  if (safe !== !!G.inShelter) {
+    G.inShelter = safe;
+    UI.setSafe(safe);
+  }
 }
 
 // ---------- loop ----------
@@ -413,6 +459,8 @@ function tick(dt) {
     updateProjectiles(dt);
     updateLoot(dt);
     updateCamera(dt);
+    updateShelterState();
+    emitSmoke(dt);
     FX.update(dt);
     if (G.victoryT >= 0) {
       G.victoryT += dt;
@@ -427,6 +475,7 @@ function tick(dt) {
     if (G.dyingT > 2.2) gameOver();
   } else if (G.state === 'menu') {
     updateMenuCamera(dt);
+    emitSmoke(dt);
     FX.update(dt);
   } else if (G.state === 'gameover' || G.state === 'victory') {
     updateMonsters(dt * 0.3);

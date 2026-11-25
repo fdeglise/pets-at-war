@@ -162,6 +162,14 @@ export function updateProjectiles(dt) {
     if (p.trail && Math.random() < (big ? 1 : 0.7)) FX.burst(p.pos, { count: big ? 3 : 1, color: p.trail, glow: true, speed: big ? 1.5 : 0.5, up: 0.5, size: big ? 0.7 : p.kind === 'fireball' ? 0.3 : p.kind === 'iceboulder' ? 0.35 : 0.14, size1: big ? 1.1 : 0, life: big ? 0.5 : 0.3, gravity: 0, spread: big ? 0.8 : 0.2 });
 
     let hitSomething = false;
+    // the Easy-mode shelter's dome stops enemy arrows, fireballs and boulders
+    if (p.team === 'enemy' && G.world.shelter && G.world.shelter.blocks(p.pos)) {
+      G.world.shelter.bump(p.pos, 1);
+      FX.burst(p.pos, { count: 14, color: 0x7dffe0, glow: true, speed: 5, size: 0.2, life: 0.5 });
+      Audio.play('arrowHit');
+      removeProjectile(i);
+      continue;
+    }
     if (p.team === 'enemy') {
       for (const f of friendly) {
         const c = tmp2.set(f.pos.x, f.pos.y + f.height * 0.5, f.pos.z);

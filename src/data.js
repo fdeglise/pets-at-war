@@ -88,7 +88,29 @@ export const PET_UPGRADES = {
   mending:  { name: 'Mending',  max: 5, text: (l) => `+${l} pet healing per second`, cost: (l) => Math.round(140 * Math.pow(l, 1.5)) },
 };
 export const TREAT_COST = 35;
-export const REVIVE_COST = 0.35; // fraction of pet max HP spent to revive the player
+export const REVIVE_COST = 0.35; // fraction of pet max HP spent to revive the player (Medium; see DIFFICULTIES)
+
+// Difficulty modes. Every multiplier is 1 on Medium, which is the original balance.
+// enemyHp/enemyDmg also apply to the three bosses; tame is added to each monster's tame chance.
+export const DIFFICULTIES = {
+  easy: {
+    name: 'Easy', color: '#5effa8', blurb: 'Gentler monsters, more coins, and a magic shelter on Haven Isle where nothing can hurt you.',
+    enemyHp: 0.7, enemyDmg: 0.55, waveSize: 0.7, spawnGap: 1.35, prep: 18, firstPrep: 16, maxAlive: 16,
+    coins: 1.3, revive: 0.25, tame: 0.15, petHeal: 1.25, startMoney: 120, shelter: true,
+  },
+  medium: {
+    name: 'Medium', color: '#ffc93c', blurb: 'The adventure as it was meant to be.',
+    enemyHp: 1, enemyDmg: 1, waveSize: 1, spawnGap: 1, prep: 12, firstPrep: 10, maxAlive: 26,
+    coins: 1, revive: REVIVE_COST, tame: 0, petHeal: 1, startMoney: 0, shelter: false,
+  },
+  hard: {
+    name: 'Hard', color: '#ff5a6e', blurb: 'Tougher monsters that hit harder, bigger waves, and reviving costs your pet more.',
+    enemyHp: 1.35, enemyDmg: 1.4, waveSize: 1.35, spawnGap: 0.8, prep: 9, firstPrep: 8, maxAlive: 32,
+    coins: 0.9, revive: 0.45, tame: -0.1, petHeal: 0.85, startMoney: 0, shelter: false,
+  },
+};
+export const DIFFICULTY_KEYS = ['easy', 'medium', 'hard'];
+export const SHELTER_HEAL = 14; // HP per second for you inside the shelter (Easy)
 export const MAX_WEAPONS = 8;
 export const MAX_ARMORS = 6;
 export const MAX_ALLIES = 3;

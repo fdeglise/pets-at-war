@@ -1,9 +1,9 @@
 // HUD, floating labels, minimap, shop/backpack panel, menus.
 import * as THREE from 'three';
-import { G, enemies, allies } from './game.js';
+import { G, enemies, allies, diff, recordKey } from './game.js';
 import {
   RARITY, ELEMENTS, ELEMENT_KEYS, ELEMENT_BONUS, ENCHANTS, PET_UPGRADES, PETS, WEAPONS, ARMORS,
-  TREAT_COST, REVIVE_COST, MAX_WEAPONS, MAX_ARMORS, QUESTS, itemName, itemRarity, enchantList, weaponDps, sellPrice,
+  TREAT_COST, MAX_WEAPONS, MAX_ARMORS, QUESTS, DIFFICULTIES, DIFFICULTY_KEYS, itemName, itemRarity, enchantList, weaponDps, sellPrice,
 } from './data.js';
 import { itemIcon, getIcon, makePet } from './models.js';
 import { Input } from './input.js';
@@ -23,11 +23,13 @@ const ICON = {
   paw: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><ellipse cx="6" cy="10" rx="2.2" ry="2.8" fill="currentColor"/><ellipse cx="10" cy="6" rx="2.2" ry="2.8" fill="currentColor"/><ellipse cx="14.5" cy="6" rx="2.2" ry="2.8" fill="currentColor"/><ellipse cx="18.5" cy="10" rx="2.2" ry="2.8" fill="currentColor"/><path d="M12 11c3 0 6 4.5 6 7 0 2-2 2.6-3.2 2.2-1-.3-1.8-.8-2.8-.8s-1.8.5-2.8.8C8 20.6 6 20 6 18c0-2.5 3-7 6-7z" fill="currentColor"/></svg>',
   wing: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M2 14c3-1 5-4 6-8 1 3 0 6-1 8 2-1 4-3 5-6 0 3-1 6-3 8 2 0 4-1 6-3-1 3-3 5-6 6 2 .5 4 0 6-1-2 2-5 3-8 3-3 0-6-2-10-7z" fill="currentColor"/></svg>',
   check: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg>',
+  dome: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M2 20h20v2H2zM4 19a8 8 0 0 1 16 0zM11 3h2v4h-2z" fill="currentColor"/></svg>',
   skull: '<svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 2C7 2 3.5 5.6 3.5 10.2c0 2.8 1.3 5 3.5 6.3V20c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2v-3.5c2.2-1.3 3.5-3.5 3.5-6.3C20.5 5.6 17 2 12 2zM8.5 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm7 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4z" fill="currentColor"/></svg>',
 };
 
 const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+const diffTag = () => `<span class="diff-tag" style="--dc:${diff().color}">${diff().name}</span>`;
 
 function statLine(item) {
   if (item.type === 'armor') {
@@ -80,6 +82,7 @@ export const UI = {
           <div id="waveTitle">WAVE 1</div>
           <div id="waveSub"></div>
           <div id="bossBar" hidden><div class="bb-name"></div><div class="bb-bar"><div class="bb-fill"></div></div></div>
+          <div id="safeChip" hidden>${ICON.dome}<span>Safe in the shelter · healing fast</span></div>
         </div>
         <div class="hud-tr">
           <div class="money" id="moneyBox">${ICON.coin}<span id="money">0</span><span id="moneyPop"></span></div>
@@ -132,16 +135,24 @@ export const UI = {
           <span class="pp-blurb">${p.blurb}</span>
         </button>`)
       .join('');
-    let best = 0, bestWin = 0;
-    try { best = +localStorage.getItem('paw-best-wave') || 0; bestWin = +localStorage.getItem('paw-best-win') || 0; } catch (e) { best = 0; }
+    const diffs = DIFFICULTY_KEYS.map((k, i) => {
+      const d = DIFFICULTIES[k];
+      return `<button class="diff-pick${k === G.difficulty ? ' on' : ''}" data-diff="${k}" role="radio" aria-checked="${k === G.difficulty}" style="--dc:${d.color}">
+          <span class="dp-pips">${'<i></i>'.repeat(i + 1)}</span><span class="dp-name">${d.name}</span></button>`;
+    }).join('');
     const k = (c) => Input.label(c);
     $('menu').innerHTML = `
       <div class="menu-inner">
         <div class="logo"><span class="l1">PETS</span><span class="l2">at</span><span class="l1">WAR</span></div>
+        <p class="credits">a game by <b>Nylan</b>, <b>Claude</b> and <b>Frédéric</b></p>
         <p class="tagline">Your pet keeps you alive. Keep your pet alive.<br><span>Find three Sky Relics, give your pet wings, and ride it into battle against Ignis the Dragon.</span></p>
         <div class="pet-row">${pets}</div>
+        <div class="diff-wrap">
+          <div class="diff-row" role="radiogroup" aria-label="Difficulty">${diffs}</div>
+          <p class="diff-blurb" id="diffBlurb">${diff().blurb}</p>
+        </div>
         <button class="play" id="playBtn">PLAY</button>
-        ${best || bestWin ? `<div class="best">${bestWin ? `Dragon slain in ${fmtTime(bestWin)}` : ''}${best && bestWin ? ' · ' : ''}${best ? `Best wave: ${best}` : ''}</div>` : ''}
+        <div class="best" id="bestLine">${this.bestLine()}</div>
         <div class="controls">
           <div><kbd>${k('KeyW')}</kbd><kbd>${k('KeyA')}</kbd><kbd>${k('KeyS')}</kbd><kbd>${k('KeyD')}</kbd> move</div>
           <div><kbd>Mouse</kbd> look · <kbd>Click</kbd> attack</div>
@@ -164,9 +175,34 @@ export const UI = {
         Audio.play('click');
       })
     );
+    $('menu').querySelectorAll('.diff-pick').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.handlers.setDifficulty(b.dataset.diff);
+        $('menu').querySelectorAll('.diff-pick').forEach((x) => {
+          x.classList.toggle('on', x === b);
+          x.setAttribute('aria-checked', String(x === b));
+        });
+        $('diffBlurb').textContent = diff().blurb;
+        $('bestLine').innerHTML = this.bestLine();
+        Audio.init();
+        Audio.play('click');
+      })
+    );
     $('playBtn').addEventListener('click', () => this.handlers.start());
     $('qualBtn').addEventListener('click', () => { this.handlers.toggleQuality(); $('qualBtn').textContent = `Graphics: ${G.quality === 'high' ? 'High' : 'Fast'}`; });
     $('muteBtn').addEventListener('click', () => { Audio.toggle(); $('muteBtn').textContent = `Sound: ${Audio.muted ? 'Off' : 'On'}`; });
+  },
+  // Records for the difficulty picked on the menu.
+  bestLine() {
+    let best = 0, bestWin = 0;
+    try {
+      best = +localStorage.getItem(recordKey('paw-best-wave')) || 0;
+      bestWin = +localStorage.getItem(recordKey('paw-best-win')) || 0;
+    } catch (e) { best = 0; }
+    const parts = [];
+    if (bestWin) parts.push(`Dragon slain in ${fmtTime(bestWin)}`);
+    if (best) parts.push(`Best wave: ${best}`);
+    return parts.length ? `${diff().name}: ${parts.join(' · ')}` : '';
   },
   showMenu() {
     this.buildMenu();
@@ -184,12 +220,14 @@ export const UI = {
     $('gameover').hidden = true;
     $('victory').hidden = true;
     $('notifs').innerHTML = '';
+    $('safeChip').hidden = true;
     this.refreshQuests();
     const pet = G.pet;
     $('petPortrait').src = getIcon('pet:' + pet.id, () => makePet(pet.id).root, 'front');
     $('petName').textContent = `${pet.name} the ${pet.def.species}`;
     $('abKey').textContent = Input.label('KeyQ');
     this.moneyShown = G.money;
+    $('money').textContent = fmt(G.money);
     this.refreshHotbar();
     this.refreshAllies();
     this.clearLabels();
@@ -199,7 +237,7 @@ export const UI = {
     $('pause').innerHTML = `
       <div class="modal">
         <h2>Paused</h2>
-        <p class="muted">Click Resume to lock the mouse again.</p>
+        <p class="muted">${diffTag()} Click Resume to lock the mouse again.</p>
         <button class="play small" id="resumeBtn">Resume</button>
         <div class="menu-opts">
           <button class="opt" id="pQual">Graphics: ${G.quality === 'high' ? 'High' : 'Fast'}</button>
@@ -227,7 +265,7 @@ export const UI = {
       <div class="modal go">
         <img class="go-pet" src="${getIcon('pet:' + pet.id, () => makePet(pet.id).root, 'front')}" alt="" />
         <h2>${pet.name} has fallen</h2>
-        <p class="muted">Without your pet, nobody can bring you back.</p>
+        <p class="muted">${diffTag()} Without your pet, nobody can bring you back.</p>
         <div class="go-stats">
           <div><b>${s.wave}</b><span>wave reached</span></div>
           <div><b>${s.kills}</b><span>monsters defeated</span></div>
@@ -238,7 +276,7 @@ export const UI = {
         </div>
         <div class="go-btns">
           <button class="play small" id="againBtn">Play again</button>
-          <button class="opt" id="menuBtn">Change pet</button>
+          <button class="opt" id="menuBtn">Change pet or difficulty</button>
         </div>
       </div>`;
     $('gameover').hidden = false;
@@ -254,7 +292,7 @@ export const UI = {
         <img class="go-pet" src="${getIcon('pet:' + pet.id, () => makePet(pet.id).root, 'front')}" alt="" />
         <div class="win-kicker">Victory</div>
         <h2>Ignis the Dragon is slain</h2>
-        <p class="muted">${pet.name} and you saved the islands. The skies are yours.</p>
+        <p class="muted">${diffTag()} ${pet.name} and you saved the islands. The skies are yours.</p>
         <div class="go-stats">
           <div><b>${fmtTime(s.time)}</b><span>time to win</span></div>
           <div><b>${s.kills}</b><span>monsters defeated</span></div>
@@ -265,7 +303,7 @@ export const UI = {
         </div>
         <div class="go-btns">
           <button class="play small" id="winAgain">Play again</button>
-          <button class="opt" id="winMenu">Change pet</button>
+          <button class="opt" id="winMenu">Change pet or difficulty</button>
         </div>
       </div>`;
     $('victory').hidden = false;
@@ -380,6 +418,10 @@ export const UI = {
     void $('petCard').offsetWidth;
     $('petCard').classList.add('shake');
   },
+  setSafe(on) {
+    $('safeChip').hidden = !on;
+    if (on) Audio.play('heal');
+  },
   setPrompt(html) {
     if (html === this.promptText) return;
     this.promptText = html;
@@ -432,6 +474,7 @@ export const UI = {
     if (this.merchantEl) {
       this.merchantEl.remove();
       this.elderEl.remove();
+      this.shelterEl.remove();
       for (const el of this.portalEls) el.remove();
       this.merchantEl = null;
     }
@@ -482,6 +525,7 @@ export const UI = {
         this.merchantEl = this.worldLabel('<b>Merchant</b><span>Press B to shop</span>');
         this.elderEl = this.worldLabel('<b class="elder">Elder</b><span>Press E to talk</span>');
         this.portalEls = G.world.portals.map(() => this.worldLabel(''));
+        this.shelterEl = this.worldLabel(`<b class="safe">${ICON.dome} Shelter</b><span>Monsters can't get in</span>`);
       }
       const calm = this.handlers.waves().state === 'prep';
       const pp = G.player ? G.player.pos : cam.position;
@@ -494,6 +538,9 @@ export const UI = {
         } else el.hidden = true;
       };
       place(this.merchantEl, G.world.merchantPos, 4.9, calm ? 55 : 18);
+      const S = G.world.shelter;
+      if (S.active && G.playerIsland === 'haven' && !G.inShelter) place(this.shelterEl, S, 11.2, 95);
+      else this.shelterEl.hidden = true;
       const Q = this.handlers.quests();
       const ready = Q.stage === 'empower';
       if (this.elderEl._ready !== ready) {
@@ -546,10 +593,11 @@ export const UI = {
     const petK = Math.max(0, pet.hp / pet.maxHp);
     $('petFill').style.width = petK * 100 + '%';
     $('petText').textContent = `${Math.ceil(pet.hp)} / ${pet.maxHp}`;
-    $('petCard').classList.toggle('danger', petK <= REVIVE_COST);
+    const revive = diff().revive;
+    $('petCard').classList.toggle('danger', petK <= revive);
     $('petHeal').querySelector('span').textContent = `${pet.healRate.toFixed(1)}/s`;
     $('petHeal').classList.toggle('active', pet.healing);
-    $('petSub').textContent = petK <= REVIVE_COST ? 'Too weak to revive you!' : `Revives you for ${Math.round(pet.maxHp * REVIVE_COST)} HP`;
+    $('petSub').textContent = petK <= revive ? 'Too weak to revive you!' : `Revives you for ${Math.round(pet.maxHp * revive)} HP`;
 
     // money ticker
     if (this.moneyShown !== G.money) {
@@ -670,6 +718,17 @@ export const UI = {
       ctx.strokeRect(-r, -r, r * 2, r * 2);
       ctx.restore();
     };
+    const S = G.world.shelter;
+    if (S.active) {
+      ctx.beginPath();
+      ctx.arc(sx(S.x), sz(S.z), Math.max(5, S.r * scale), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(94,255,208,0.28)';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#5effd0';
+      ctx.stroke();
+      dot(S.x, S.z, 2.5, '#eafff8', '#0a3a30');
+    }
     for (const pt of G.world.portals) dot(pt.x, pt.z, 4.5, pt.sealed ? '#3a2030' : '#' + pt.colors.c2.toString(16).padStart(6, '0'), pt.sealed ? '#ff4a6a' : '#10122a');
     if (G.playerIsland === 'haven' || p.mounted) {
       dot(G.world.merchantPos.x, G.world.merchantPos.z, 4, '#ffcf4a', '#3a2a00');
@@ -718,6 +777,7 @@ export const UI = {
   openPanel(tab) {
     if (tab) this.panelTab = tab;
     this.panelMsg = '';
+    this.clearConfirm = false;
     this.renderPanel();
     $('panel').hidden = false;
   },
@@ -830,7 +890,7 @@ export const UI = {
       body = `<div class="held pet-held"><img src="${petIcon}" alt="" /><div><div class="held-lbl">Your pet</div>
           <div class="held-name">${pet.name} the ${pet.def.species}</div>
           <div class="held-stat">${Math.ceil(pet.hp)} / ${pet.maxHp} HP · heals you ${pet.healRate.toFixed(1)} HP/s</div>
-          <div class="held-ench">If you fall, ${pet.name} spends ${Math.round(REVIVE_COST * 100)}% of max HP to revive you. If ${pet.name} falls, the run is over.</div></div></div>
+          <div class="held-ench">If you fall, ${pet.name} spends ${Math.round(diff().revive * 100)}% of max HP to revive you. If ${pet.name} falls, the run is over.</div></div></div>
         <div class="rows">
           <div class="row"><div class="row-name">Pet Treat</div><div class="row-desc">Restores 50% of ${pet.name}'s HP right now</div>${buyBtn('treat', '', TREAT_COST)}</div>
           ${Object.entries(PET_UPGRADES).map(([k, u]) => {
@@ -862,7 +922,15 @@ export const UI = {
           });
         }).join('')
         : '<p class="tab-note">No armor yet. Buy some or find it in chests.</p>';
-      body = `<h3>Weapons <span class="muted">${p.weapons.length}/${MAX_WEAPONS}</span></h3><div class="grid">${wcards}</div>
+      const prev = shopApi.clearPreview();
+      const clearBar = !prev.count
+        ? '<div class="clear-bar empty"><span>Your backpack only holds what you are using right now.</span></div>'
+        : this.clearConfirm
+          ? `<div class="clear-bar confirm"><span>Sell <b>${prev.count}</b> item${prev.count === 1 ? '' : 's'} for ${ICON.coin}<b>${fmt(prev.value)}</b>? You keep the weapon in your hand and the armor you wear.</span>
+              <button class="buy sell" data-act="clearYes">Yes, clear it</button><button class="buy alt" data-act="clearNo">Cancel</button></div>`
+          : `<div class="clear-bar"><span>Too full? Clearing sells everything except the weapon in your hand and the armor you wear.</span>
+              <button class="buy sell" data-act="clear">Clear backpack<span>${ICON.coin}${fmt(prev.value)}</span></button></div>`;
+      body = `${clearBar}<h3>Weapons <span class="muted">${p.weapons.length}/${MAX_WEAPONS}</span></h3><div class="grid">${wcards}</div>
         <h3>Armor <span class="muted">${p.armors.length}/${MAX_ARMORS}</span></h3><div class="grid">${acards}</div>`;
     }
     $('panel').innerHTML = `
@@ -883,6 +951,7 @@ export const UI = {
     if (tab) {
       this.panelTab = tab.dataset.tab;
       this.panelMsg = '';
+      this.clearConfirm = false;
       Audio.play('click');
       const body = $('panel').querySelector('.panel-body');
       this.renderPanel();
@@ -904,6 +973,9 @@ export const UI = {
       equipW: () => shopApi.equipWeapon(+arg),
       equipA: () => shopApi.equipArmor(+arg),
       empower: () => this.handlers.empower(),
+      clear: () => { this.clearConfirm = true; Audio.play('click'); return null; },
+      clearNo: () => { this.clearConfirm = false; Audio.play('click'); return null; },
+      clearYes: () => { this.clearConfirm = false; return shopApi.clearBackpack(); },
     }[act];
     if (!fn) return;
     const err = fn();

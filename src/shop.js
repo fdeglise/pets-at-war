@@ -120,6 +120,32 @@ export const Shop = {
     }
     return 'Item not found.';
   },
+  // Everything that "Clear backpack" would sell: every weapon except the one in your hand
+  // and every armor except the one you wear.
+  clearList() {
+    const p = G.player;
+    const held = p.weapon, worn = p.armor;
+    return [...p.weapons.filter((w) => w !== held), ...p.armors.filter((a) => a !== worn)];
+  },
+  clearPreview() {
+    const list = this.clearList();
+    return { count: list.length, value: list.reduce((s, it) => s + sellPrice(it), 0) };
+  },
+  clearBackpack() {
+    const p = G.player;
+    const { count, value } = this.clearPreview();
+    if (!count) return 'Your backpack is already empty.';
+    const held = p.weapon, worn = p.armor;
+    p.weapons = held ? [held] : p.weapons.slice(0, 1);
+    p.slot = 0;
+    p.armors = worn ? [worn] : [];
+    p.refreshWeaponModel();
+    G.money += value;
+    Audio.play('coin');
+    UI.notify(`Backpack cleared: sold ${count} item${count === 1 ? '' : 's'} for ${value} coins`, '#ffd24a');
+    UI.refreshHotbar();
+    return null;
+  },
   equipWeapon(uid) {
     const p = G.player;
     const i = p.weapons.findIndex((w) => w.uid === uid);
